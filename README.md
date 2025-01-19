@@ -1,3 +1,3 @@
-wget https://github.com/Hokare/Serveur-Minecraft/blob/main/minecraft.sh \n
-chmod +x minecraft.sh
-screen -r <Nom du serveur>
+1. wget https://github.com/Hokare/Serveur-Minecraft/blob/main/minecraft.sh
+2. chmod +x minecraft.sh
+3. screen -r <Nom du serveur>
