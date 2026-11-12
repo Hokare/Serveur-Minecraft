@@ -12,7 +12,6 @@ import urllib.request
 
 import docker
 from docker.errors import APIError, ContainerError, DockerException, ImageNotFound, NotFound
-from docker.types import Mount
 
 from .models import RouterSpec, ServerSpec
 
@@ -457,25 +456,21 @@ class Manager:
         self.cleanup_updater()
         if not project.startswith("/"):
             raise PanelError(501, f"Chemin de projet inattendu : {project}")
-        # Le dossier monté doit contenir docker-compose.yml, sinon la reconstruction échouerait plus tard
-        # avec un message obscur (cas d'un panel créé avec un mauvais montage /project).
-        repair = (f"Le dossier du projet monté dans le panel ({project}) ne contient pas docker-compose.yml. "
-                  "Sur le serveur, lance une fois « docker compose up -d --build » depuis le dossier du projet, puis réessaie.")
-        try:
-            self.client.containers.run(
-                image=me.attrs["Image"], entrypoint=["test", "-f", f"{project}/docker-compose.yml"],
-                mounts=[Mount(target=project, source=project, type="bind", read_only=True)],
-                network_mode="none", remove=True)
-        except (ContainerError, APIError) as exc:
-            raise PanelError(501, repair) from exc
+        compose_file = f"{project}/docker-compose.yml"
+        # Le test se fait DANS l'updater : si le dossier monté est mauvais (ex. ancien montage « /project » vide),
+        # l'interface affiche ce message au lieu d'une erreur obscure de compose.
+        missing = (f"docker-compose.yml introuvable dans {project}. Sur le serveur, lance une fois "
+                   "« docker compose up -d --build » depuis le dossier du projet, puis réessaie.")
+        script = (f"[ -f {shlex.quote(compose_file)} ] || {{ echo {shlex.quote(missing)}; exit 2; }}; "
+                  f"sleep 3 && docker compose --project-directory {shlex.quote(project)} "
+                  f"-f {shlex.quote(compose_file)} up -d --build")
         try:
             # Le dossier est monté au MÊME chemin que sur l'hôte : compose résout `.:/project` côté client,
             # le démon Docker doit donc recevoir le vrai chemin de l'hôte (et non un chemin interne).
             self.client.containers.run(
                 image=me.attrs["Image"],          # même image : elle embarque docker + compose
                 name=UPDATER_NAME,
-                command=["sh", "-c", f"sleep 3 && docker compose --project-directory {shlex.quote(project)} "
-                                     f"-f {shlex.quote(project + '/docker-compose.yml')} up -d --build"],
+                command=["sh", "-c", script],
                 environment=env,
                 working_dir=project,
                 volumes={

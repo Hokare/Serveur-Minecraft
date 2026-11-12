@@ -149,30 +149,35 @@ def test_list_and_delete_files(monkeypatch):
     assert calls[-1] == (["rm", "-f", "--"], ["/data/mods/Zeta.jar"])
 
 
-def test_updater_explains_broken_project_mount(monkeypatch):
+def test_updater_script_checks_compose_file_itself_and_runs_once(monkeypatch):
+    """Le test du fichier compose est dans le script de l'updater (un seul conteneur lancé), avec un message clair."""
+    import shlex
     import socket as _socket
     from types import SimpleNamespace
-    from docker.errors import ContainerError
-    from app.dockerops import Manager, PanelError
+    from docker.errors import NotFound
+    from app.dockerops import Manager
 
-    me = SimpleNamespace(attrs={"Image": "sha256:abc", "Mounts": [{"Destination": "/project", "Source": "/project"}]})
+    me = SimpleNamespace(attrs={"Image": "sha256:abc", "Mounts": [{"Destination": "/project", "Source": "/root/Serveur-Minecraft"}]})
+    runs = []
 
     class Containers:
         def get(self, name):
             if name == "me":
                 return me
-            from docker.errors import NotFound
             raise NotFound("absent")
 
         def run(self, **kwargs):
-            raise ContainerError("c", 1, "test -f", "img", b"")   # docker-compose.yml absent
+            runs.append(kwargs)
 
     m = Manager()
     m._client = SimpleNamespace(containers=Containers())
     monkeypatch.setattr(_socket, "gethostname", lambda: "me")
-    with pytest.raises(PanelError) as e:
-        m.launch_updater({})
-    assert e.value.status == 501 and "docker compose up -d --build" in e.value.message
+    m.launch_updater({})
+    assert len(runs) == 1
+    script = runs[0]["command"][-1]
+    assert script.startswith("[ -f /root/Serveur-Minecraft/docker-compose.yml ] ||")
+    assert "docker compose up -d --build" in script and "exit 2" in script
+    assert shlex.split(script)  # le script est correctement échappé
 
 
 def test_router_spec():
