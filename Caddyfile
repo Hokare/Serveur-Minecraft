@@ -1,0 +1,17 @@
+{
+	# Certificats émis par l'autorité locale de Caddy (aucun nom de domaine public requis).
+	local_certs
+	# Pas de redirection depuis le port 80 : le panel n'est servi qu'en HTTPS.
+	auto_https disable_redirects
+}
+
+# PANEL_HOSTNAME : l'adresse utilisée pour ouvrir le panel, par exemple l'IP du serveur (192.168.1.50)
+# ou un nom (panel.local). Voir le README.
+{$PANEL_HOSTNAME:panel.local} {
+	# Réseau local uniquement : toute connexion venant d'une adresse publique est refusée,
+	# même si le port est redirigé par erreur depuis la box.
+	@outside not remote_ip private_ranges
+	respond @outside "Accès refusé : réseau local uniquement." 403
+
+	reverse_proxy panel:8080
+}

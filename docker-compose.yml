@@ -19,7 +19,7 @@ services:
       PANEL_REPO: ${PANEL_REPO:-Hokare/Serveur-Minecraft}
       PANEL_TRACK: ${PANEL_TRACK:-main}
     ports:
-      # Local uniquement. Pour l'exposer, place-le derrière un reverse proxy HTTPS.
+      # Accès de secours en HTTP, depuis le serveur lui-même uniquement (ou via un tunnel SSH).
       - "127.0.0.1:8080:8080"
     volumes:
       # Accès complet à Docker = équivalent root sur l'hôte : garde le mot de passe fort.
@@ -29,8 +29,30 @@ services:
     networks:
       - mc-net   # permet au panel de « pinger » les serveurs (joueurs, latence)
 
+  # HTTPS pour le réseau local : Caddy chiffre la connexion (mot de passe protégé) et refuse
+  # tout ce qui ne vient pas d'une adresse privée (voir le Caddyfile et le README).
+  proxy:
+    image: caddy:2
+    container_name: mc-panel-proxy
+    restart: unless-stopped
+    depends_on:
+      - panel
+    environment:
+      PANEL_HOSTNAME: ${PANEL_HOSTNAME:-panel.local}
+    ports:
+      # PANEL_BIND : adresse de la machine sur le réseau local (ex. 192.168.1.50) pour n'écouter que là.
+      - "${PANEL_BIND:-0.0.0.0}:${PANEL_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data           # conserve l'autorité de certification locale entre les redémarrages
+      - caddy-config:/config
+    networks:
+      - mc-net
+
 volumes:
   mc-panel-data:
+  caddy-data:
+  caddy-config:
 
 networks:
   mc-net:

@@ -18,12 +18,39 @@ git clone https://github.com/Hokare/Serveur-Minecraft.git && cd Serveur-Minecraf
 docker compose up -d --build
 ```
 
-Ouvre <http://127.0.0.1:8080> et connecte-toi avec **admin / admin** (identifiants par défaut). Un bandeau rouge te rappelle de les changer
+Ouvre <http://127.0.0.1:8080> depuis le serveur (pour y accéder depuis un autre appareil du réseau, en HTTPS, voir la section
+« HTTPS sur le réseau local » plus bas) et connecte-toi avec **admin / admin** (identifiants par défaut). Un bandeau rouge te rappelle de les changer
 dans le menu profil tant que c'est le cas. Pour choisir toi-même les identifiants initiaux, mets `PANEL_USER=...` et `PANEL_PASSWORD=...`
 dans un fichier `.env` avant le premier lancement.
 
 > Le panel est construit **depuis GitHub** (`main`) : le code doit donc être poussé sur le dépôt.
 > Pour construire depuis le dossier local, mets `PANEL_BUILD_CONTEXT=.` dans `.env`.
+
+## HTTPS sur le réseau local
+
+Le panel est servi en **HTTPS** par un conteneur Caddy (`mc-panel-proxy`), de façon à ce que ton mot de passe ne circule jamais en clair,
+et il n'accepte que les connexions venant d'adresses privées (192.168.x.x, 10.x.x.x, 172.16-31.x.x) : même si le port était redirigé
+par erreur depuis ta box, un accès depuis Internet est refusé.
+
+1. Dans `.env`, indique l'adresse avec laquelle tu ouvriras le panel — le plus simple est l'IP du serveur sur ton réseau :
+   ```
+   PANEL_HOSTNAME=192.168.1.50
+   ```
+   (un nom comme `panel.local` marche aussi, à condition que ton PC sache le résoudre : fichier `hosts` ou DNS de la box.)
+2. `docker compose up -d --build`, puis ouvre **https://192.168.1.50** (ou `https://<PANEL_HOSTNAME>`).
+3. Le navigateur affiche un avertissement : le certificat est signé par une autorité locale créée sur ton serveur, pas par une autorité
+   publique. Pour le faire disparaître, installe cette autorité sur ton PC (une seule fois) :
+   ```bash
+   docker cp mc-panel-proxy:/data/caddy/pki/authorities/local/root.crt ./caddy-root.crt
+   ```
+   puis importe `caddy-root.crt` comme autorité de certification racine de confiance (Windows : double-clic → « Installer le certificat »
+   → « Autorités de certification racines de confiance » ; Firefox : Paramètres → Certificats → Autorités). Sinon, accepte l'exception :
+   la connexion reste chiffrée.
+4. Ne redirige **jamais** le port 443 de ta box vers le serveur.
+
+Variables facultatives : `PANEL_HTTPS_PORT` (port d'écoute, 443 par défaut ; mets `8443` si 443 est déjà pris, l'adresse devient
+`https://IP:8443`) et `PANEL_BIND` (n'écouter que sur l'IP locale du serveur). Le port `127.0.0.1:8080` en HTTP reste ouvert,
+mais seulement depuis le serveur lui-même (secours, tunnel SSH).
 
 ## Sauvegardes et changements risqués
 
