@@ -27,13 +27,14 @@ h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -0.01em; }
 svg.i { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex: none; }
 
 /* ---------- coque : rail + panneau + contenu ---------- */
-.shell { display: flex; height: 100vh; padding: 12px 0 0 12px; gap: 0; }
+.shell { display: flex; height: 100vh; }
 .nav {
-  display: flex; flex: none; height: calc(100vh - 12px);
-  border: 1px solid var(--line); border-bottom: 0; border-radius: 24px 0 0 0;
+  display: flex; flex: none; height: 100vh;
+  border-right: 1px solid var(--line);
   overflow: hidden; background: var(--panel);
-  box-shadow: 0 1px 0 rgba(255,255,255,.6) inset, 0 12px 40px -24px rgba(60,50,30,.35);
 }
+.nav.no-panel .panel { display: none; }
+.nav.no-panel { border-right: 0; }
 .main { flex: 1; min-width: 0; overflow-y: auto; padding: 22px 32px 60px; }
 
 /* ---------- rail d'icônes ---------- */
@@ -175,9 +176,11 @@ td.mono, .mono { font-family: var(--mono); font-size: 13px; }
 .check { display: flex; align-items: center; gap: 10px; font-size: 14.5px; }
 .check input { width: 18px; height: 18px; accent-color: var(--ink); }
 .form-actions {
-  position: sticky; bottom: 0; display: flex; align-items: center; gap: 14px; padding: 14px 0;
-  background: linear-gradient(to top, var(--bg) 70%, transparent);
+  position: sticky; bottom: -60px; margin-bottom: -60px; display: flex; align-items: flex-start; gap: 14px; padding: 14px 0 20px;
+  background: var(--bg); border-top: 1px solid var(--line); z-index: 5;
 }
+.form-actions .hint { margin-top: 10px; }
+.req { color: var(--bad); font-weight: 600; }
 
 /* ---------- console ---------- */
 .console {
@@ -203,12 +206,11 @@ a { color: inherit; }
 
 @media (max-width: 900px) {
   .panel { display: none; }
-  .nav { border-radius: 24px 0 0 0; }
   .main { padding: 18px 18px 60px; }
 }
 @media (max-width: 560px) {
-  .shell { padding: 0; flex-direction: column-reverse; }
-  .nav { height: auto; width: 100%; border-radius: 0; border: 0; }
+  .shell { flex-direction: column-reverse; }
+  .nav { height: auto; width: 100%; border: 0; border-top: 1px solid var(--line); }
   .rail { width: 100%; flex-direction: row; justify-content: space-around; padding: 6px; }
   .rail-spacer, .avatar { display: none; }
   .fab { width: 44px; height: 44px; margin: 0; font-size: 22px; }

@@ -147,18 +147,18 @@ function serverForm(spec, isNew) {
   const env = spec.env || {};
   const extra = Object.entries(env).filter(([k]) => !KNOWN_ENV.has(k)).map(([k, v]) => `${k}=${v}`).join('\n');
   const inp = (f, label, val, attrs = '', hint = '') =>
-    `<div class="field"><label>${label}</label><input data-f="${f}" value="${esc(val ?? '')}" ${attrs}>${hint ? `<span class="hint">${hint}</span>` : ''}</div>`;
+    `<div class="field"><label>${label}${attrs.includes('required') ? ' <span class="req">*</span>' : ''}</label><input data-f="${f}" value="${esc(val ?? '')}" ${attrs}>${hint ? `<span class="hint">${hint}</span>` : ''}</div>`;
   return `
   <form id="srv-form" autocomplete="off" onsubmit="return false">
     <div class="form-section"><h3>Serveur</h3><div class="fields">
-      ${inp('name', 'Nom', spec.name, `${isNew ? '' : 'disabled'} placeholder="survie" pattern="[a-z0-9][a-z0-9_-]*"`, isNew ? 'a-z, 0-9, - et _ (sert de nom au conteneur).' : '')}
-      ${inp('image_tag', 'Tag de l\'image itzg/minecraft-server', spec.image_tag, 'placeholder="latest"', 'Ex. latest, java21, java17, stable.')}
+      ${inp('name', 'Nom', spec.name, `required ${isNew ? '' : 'disabled'} placeholder="survie" pattern="[a-z0-9][a-z0-9_-]*"`, isNew ? 'a-z, 0-9, - et _ (sert de nom au conteneur).' : '')}
+      ${inp('image_tag', 'Tag de l\'image itzg/minecraft-server', spec.image_tag, 'required placeholder="latest"', 'Ex. latest, java21, java17, stable.')}
       <div class="field"><label>Redémarrage automatique</label><select data-f="restart">
         ${['unless-stopped', 'always', 'on-failure', 'no'].map((r) => `<option ${r === spec.restart ? 'selected' : ''}>${r}</option>`).join('')}</select></div>
     </div></div>
 
     <div class="form-section"><h3>Ressources</h3><div class="fields">
-      ${inp('memory', 'Mémoire JVM (MEMORY)', spec.memory, 'placeholder="2G"', 'Tas Java alloué (-Xmx).')}
+      ${inp('memory', 'Mémoire JVM (MEMORY)', spec.memory, 'required placeholder="2G"', 'Tas Java alloué (-Xmx).')}
       ${inp('mem_limit', 'Limite mémoire du conteneur', spec.mem_limit, 'placeholder="3G"', 'Vide = illimitée. Prévois ~1 Go de plus que la JVM.')}
       ${inp('cpu_limit', 'Limite CPU (cœurs)', spec.cpu_limit, 'type="number" step="0.1" min="0.1" placeholder="2"', 'Vide = illimitée.')}
     </div></div>
@@ -179,7 +179,7 @@ function serverForm(spec, isNew) {
     </div></div>
 
     <div class="form-section"><label class="check"><input type="checkbox" data-f="eula" ${String(env.EULA).toUpperCase() === 'TRUE' ? 'checked' : ''}>
-      J'accepte l'<a href="https://www.minecraft.net/en-us/eula" target="_blank" rel="noopener">EULA de Minecraft</a></label></div>
+      J'accepte l'<a href="https://www.minecraft.net/en-us/eula" target="_blank" rel="noopener">EULA de Minecraft</a> <span class="req">*</span></label></div>
 
     <div class="form-actions">
       <button class="btn primary" data-act="save-server" data-new="${isNew ? 1 : 0}">${ic('save')} ${isNew ? 'Créer le serveur' : 'Appliquer'}</button>
@@ -245,7 +245,6 @@ function renderRail() {
   const up = S.ov?.docker?.ok;
   $('#rail').innerHTML = `
     <button class="fab" data-nav="new" title="Nouveau serveur">${ic('plus', 26)}</button>
-    <button class="rail-btn" data-act="focus-filter" title="Rechercher">${ic('search')}</button>
     ${NAV.map((n) => `<button class="rail-btn ${S.view === n.id || (n.id === 'server' && S.view === 'new') ? 'active' : ''}" data-nav="${n.id}" title="${n.title}">
       ${ic(n.icon)}${alerts[n.id] ? '<span class="dot"></span>' : ''}</button>`).join('')}
     <span class="rail-spacer"></span>
@@ -255,6 +254,7 @@ function renderRail() {
 function renderPanel() {
   const titles = { home: 'Accueil', server: 'Serveurs', new: 'Nouveau serveur', router: 'Routeur', docker: 'Docker' };
   $('#panel-title').textContent = titles[S.view];
+  document.querySelector('.nav').classList.toggle('no-panel', S.view !== 'server');
   const servers = (S.ov?.servers || []).filter((s) => s.name.includes(S.filter.toLowerCase()));
   const router = S.ov?.router;
   const row = (s) => {
@@ -402,8 +402,8 @@ function routerForm(spec, exists) {
   const extra = Object.entries(spec.env || {}).map(([k, v]) => `${k}=${v}`).join('\n');
   return `<form id="router-form" autocomplete="off" onsubmit="return false">
     <div class="form-section"><h3>Paramètres du routeur</h3><div class="fields">
-      <div class="field"><label>Tag de l'image itzg/mc-router</label><input data-r="image_tag" value="${esc(spec.image_tag)}"></div>
-      <div class="field"><label>Port public (hôte)</label><input data-r="host_port" type="number" min="1" max="65535" value="${spec.host_port}"><span class="hint">Port sur lequel les joueurs se connectent (25565 par défaut).</span></div>
+      <div class="field"><label>Tag de l'image itzg/mc-router <span class="req">*</span></label><input data-r="image_tag" required value="${esc(spec.image_tag)}"></div>
+      <div class="field"><label>Port public (hôte) <span class="req">*</span></label><input data-r="host_port" required type="number" min="1" max="65535" value="${spec.host_port}"><span class="hint">Port sur lequel les joueurs se connectent (25565 par défaut).</span></div>
       <div class="field wide"><label>Routes manuelles supplémentaires</label>
         <textarea data-r="mappings" placeholder="vieux.exemple.com=autre-machine:25565">${esc(spec.mappings)}</textarea>
         <span class="hint">Une route par ligne : hostname=hôte:port. Les serveurs créés ici sont découverts automatiquement via leur hostname.</span></div>
@@ -516,7 +516,6 @@ async function run(label, fn) {
 }
 
 const ACTIONS = {
-  'focus-filter': () => $('#filter').focus(),
   start: () => run('Démarrage', async () => { await api(`/servers/${S.sel}/start`, { method: 'POST' }); toast('Serveur démarré'); }),
   stop: () => run('Arrêt', async () => { toast('Arrêt en cours (sauvegarde du monde)…'); await api(`/servers/${S.sel}/stop`, { method: 'POST' }); toast('Serveur arrêté'); }),
   restart: () => run('Redémarrage', async () => { toast('Redémarrage en cours…'); await api(`/servers/${S.sel}/restart`, { method: 'POST' }); toast('Serveur redémarré'); }),
@@ -529,6 +528,7 @@ const ACTIONS = {
   },
   'save-server': async (btn) => {
     const isNew = btn.dataset.new === '1';
+    if (!$('#srv-form').reportValidity()) return;
     let spec;
     try { spec = readServerForm(); } catch (e) { toast(e.message, true); return; }
     if (isNew && !$('#srv-form [data-f="eula"]').checked) { toast('Accepte l\'EULA de Minecraft pour continuer.', true); return; }
@@ -549,6 +549,7 @@ const ACTIONS = {
   'r-restart': () => run('Routeur', () => api('/router/restart', { method: 'POST' })),
   'r-delete': async () => { if (confirm('Supprimer le routeur ?')) await run('Routeur', () => api('/router', { method: 'DELETE' })); mountMain(); },
   'save-router': async (btn) => {
+    if (!$('#router-form').reportValidity()) return;
     const f = (k) => $(`#router-form [data-r="${k}"]`).value.trim();
     const env = {};
     f('env').split('\n').forEach((l) => { const i = l.indexOf('='); if (i > 0) env[l.slice(0, i).trim()] = l.slice(i + 1).trim(); });
