@@ -25,6 +25,22 @@ mets `PANEL_PASSWORD=...` (et éventuellement `PANEL_USER=...`) dans un fichier 
 > Le panel est construit **depuis GitHub** (`main`) : le code doit donc être poussé sur le dépôt.
 > Pour construire depuis le dossier local, mets `PANEL_BUILD_CONTEXT=.` dans `.env`.
 
+## Sauvegardes et changements risqués
+
+- Onglet **Sauvegardes** d'un serveur : créer, télécharger, restaurer, supprimer. Une sauvegarde est une archive `.tar.gz`
+  du dossier de données (sans `logs`, `cache`, `crash-reports`), stockée dans le volume du panel (`/data/backups/<serveur>/`).
+  Le serveur peut rester allumé : le panel suspend l'écriture du monde (`save-off` / `save-all flush`) pendant l'archivage.
+- **Restaurer** remplace tout le contenu du serveur par la sauvegarde ; une sauvegarde « avant restauration » est créée d'abord,
+  et l'archive est testée avant d'effacer quoi que ce soit.
+- Modifier le **type** ou la **version** d'un serveur existant affiche un avertissement et propose une sauvegarde automatique
+  avant d'appliquer (baisser la version est signalé comme risque élevé).
+- Les sauvegardes sont sur le **même disque** que les serveurs : télécharge les importantes.
+
+## Mods et plugins
+
+Onglet **Mods / Plugins** : envoi de fichiers `.jar` (128 Mo max, variable `PANEL_MAX_UPLOAD_MB`), liste et suppression.
+Le dossier est `plugins/` pour Paper/Purpur/Spigot/Folia, `mods/` pour Fabric/Forge/NeoForge/Quilt. Redémarre ensuite le serveur.
+
 ## Profil : compte et mise à jour
 
 Clique sur le cercle **MC** en bas à gauche :

@@ -122,6 +122,9 @@ svg.i { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width:
 .btn .i { font-size: 16px; }
 
 /* ---------- onglets ---------- */
+.btn { text-decoration: none; }
+.tabs { overflow-x: auto; scrollbar-width: none; }
+.tab { white-space: nowrap; }
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 22px; }
 .tab {
   display: flex; align-items: center; gap: 8px; padding: 10px 14px; border: 0; background: none; cursor: pointer;
@@ -176,6 +179,10 @@ td.mono, .mono { font-family: var(--mono); font-size: 13px; }
 .seg-btn { border: 0; background: none; padding: 7px 16px; border-radius: 99px; cursor: pointer; color: var(--ink-2); font-size: 14px; }
 .seg-btn.on { background: var(--ink); color: #fff; }
 .access-pane[hidden] { display: none; }
+.ask-actions { display: flex; justify-content: flex-end; gap: 10px; padding: 16px 0 18px; }
+.ask-list { margin: 0; padding-left: 20px; display: grid; gap: 8px; font-size: 14.5px; }
+.btn.danger-fill { background: var(--bad); border-color: var(--bad); color: #fff; }
+.btn.danger-fill:hover { background: #983b30; }
 .dropzone { border-style: dashed; border-width: 2px; text-align: center; padding: 26px 20px; transition: background .15s; }
 .dropzone.over { background: #efebe0; border-color: var(--ink); }
 .dropzone .notice { text-align: left; }

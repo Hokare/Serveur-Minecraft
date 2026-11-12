@@ -70,6 +70,23 @@ def test_upload_endpoint_streams_body_and_enforces_limit(client, monkeypatch):
     assert client.put("/api/servers/survie/files/mods?filename=a.jar", content=b"x").status_code == 401
 
 
+def test_backup_routes_not_shadowed_and_download(client, monkeypatch, tmp_path):
+    from app import main
+    calls = []
+    monkeypatch.setattr(main.backups, "start_create", lambda n, r="manuelle": calls.append(("create", n, r)) or {"state": "running"})
+    monkeypatch.setattr(main.backups, "start_restore", lambda n, f: calls.append(("restore", n, f)) or {"state": "running"})
+    monkeypatch.setattr(main.manager, "action", lambda n, a: calls.append(("action", a)) or {})
+    assert client.post("/api/servers/survie/backups?reason=avant-modif", headers=w()).json() == {"state": "running"}
+    assert client.post("/api/servers/survie/backups/survie-20260101-100000-manuelle.tar.gz/restore", headers=w()).status_code == 200
+    assert calls == [("create", "survie", "avant-modif"), ("restore", "survie", "survie-20260101-100000-manuelle.tar.gz")]
+    f = tmp_path / "x.tar.gz"
+    f.write_bytes(b"data")
+    monkeypatch.setattr(main.backups, "path", lambda n, fn: f)
+    r = client.get("/api/servers/survie/backups/survie-20260101-100000-manuelle.tar.gz", headers=basic())
+    assert r.status_code == 200 and r.content == b"data"
+    assert client.get("/api/servers/survie/backups/x.tar.gz").status_code == 401
+
+
 def test_static_index_served(client):
     r = client.get("/", headers=basic())
     assert "MC Panel" in r.text and r.headers["cache-control"] == "no-cache"

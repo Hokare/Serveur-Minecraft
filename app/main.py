@@ -8,11 +8,12 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import system
 from .auth import AuthStore
+from .backups import Backups
 from .dockerops import ROUTER_IMAGE, SERVER_IMAGE, Manager, PanelError
 from .models import AccountUpdate, CommandBody, PlayerBody, RouterSpec, ServerSpec
 from .monitor import ROUTER_KEY, Monitor, host_stats
@@ -28,6 +29,7 @@ auth = AuthStore(
 )
 manager = Manager()
 monitor = Monitor(manager)
+backups = Backups(manager)
 
 
 @asynccontextmanager
@@ -114,6 +116,33 @@ def server_logs(name: str, tail: int = 300):
 @app.post("/api/servers/{name}/command")
 def server_command(name: str, body: CommandBody):
     return {"output": manager.command(name, body.command)}
+
+
+@app.get("/api/servers/{name}/backups")
+def backups_status(name: str):
+    return backups.status(name)
+
+
+@app.post("/api/servers/{name}/backups")
+def backups_create(name: str, reason: str = "manuelle"):
+    return backups.start_create(name, reason)
+
+
+@app.get("/api/servers/{name}/backups/{filename}")
+def backups_download(name: str, filename: str):
+    path = backups.path(name, filename)
+    return FileResponse(path, filename=filename, media_type="application/gzip")
+
+
+@app.delete("/api/servers/{name}/backups/{filename}")
+def backups_delete(name: str, filename: str):
+    backups.delete(name, filename)
+    return {"ok": True}
+
+
+@app.post("/api/servers/{name}/backups/{filename}/restore")
+def backups_restore(name: str, filename: str):
+    return backups.start_restore(name, filename)
 
 
 MAX_UPLOAD = int(os.environ.get("PANEL_MAX_UPLOAD_MB", "128")) * 1024 * 1024

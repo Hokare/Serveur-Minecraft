@@ -439,6 +439,107 @@ function liveHome() {
       <a href="#" data-nav="router" class="hint">Configurer →</a></div></div>`;
 }
 
+/* ---------------------------------------------------------------- Sauvegardes */
+const REASON_LABELS = { manuelle: 'Manuelle', 'avant-modif': 'Avant modification', 'avant-restauration': 'Avant restauration' };
+const fmtDate = (ts) => new Date(ts * 1000).toLocaleString('fr-FR', { dateStyle: 'medium', timeStyle: 'short' });
+
+function mountBackups() {
+  $('#tabbody').innerHTML = `
+    <div class="card"><div class="chart-head"><div><b>Sauvegardes du monde</b>
+      <div class="hint" style="margin-top:4px">Archive du dossier de données du serveur (monde, configuration, plugins, mods), sans les journaux. Le serveur peut rester allumé.</div></div>
+      <button class="btn primary" data-act="backup-create" id="backup-btn">${ic('save')} Créer une sauvegarde</button></div>
+      <div id="backup-state" style="margin-top:12px"></div></div>
+    <div class="section-title">Sauvegardes existantes <span id="backup-total" class="hint"></span></div>
+    <div class="card" id="backup-list"><div class="empty">Chargement…</div></div>
+    <p class="hint" style="margin-top:12px">Stockées dans le volume de données du panel, sur le même disque que le serveur : pense à télécharger les sauvegardes importantes.</p>`;
+}
+
+async function loadBackups() {
+  const list = $('#backup-list');
+  if (!list || !S.sel) return null;
+  let data;
+  try { data = await api(`/servers/${encodeURIComponent(S.sel)}/backups`); } catch (e) { list.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return null; }
+  if (!$('#backup-list')) return null;
+  const job = data.job, busy = job?.state === 'running';
+  $('#backup-state').innerHTML = !data.supported
+    ? '<div class="banner">Les sauvegardes nécessitent que le panel tourne via le docker-compose.yml fourni.</div>'
+    : busy ? `<div class="notice"><span class="spin"></span> ${esc(job.label)}… ne ferme pas cette page si possible.</div>`
+    : job?.state === 'failed' ? `<div class="banner">Échec : ${esc(job.error || 'erreur inconnue')}</div>` : '';
+  const btn = $('#backup-btn'); if (btn) btn.disabled = busy || !data.supported;
+  $('#backup-total').textContent = data.backups.length ? `· ${data.backups.length} · ${fmtBytes(data.total_size)}` : '';
+  list.innerHTML = data.backups.length ? `<table><thead><tr><th>Date</th><th>Type</th><th>Taille</th><th></th></tr></thead><tbody>
+    ${data.backups.map((b) => `<tr><td>${esc(fmtDate(b.created))}</td><td><span class="pill">${esc(REASON_LABELS[b.reason] || b.reason)}</span></td><td>${fmtBytes(b.size)}</td>
+      <td style="text-align:right;white-space:nowrap">
+        <a class="btn" href="/api/servers/${encodeURIComponent(S.sel)}/backups/${encodeURIComponent(b.file)}" download>${ic('download')} Télécharger</a>
+        <button class="btn" data-act="backup-restore" data-file="${esc(b.file)}" ${busy ? 'disabled' : ''}>${ic('refresh')} Restaurer</button>
+        <button class="icon-btn" data-act="backup-del" data-file="${esc(b.file)}" title="Supprimer" ${busy ? 'disabled' : ''}>${ic('trash', 18)}</button></td></tr>`).join('')}</tbody></table>`
+    : '<div class="empty">Aucune sauvegarde pour l\'instant.</div>';
+  return data;
+}
+
+// Lance une sauvegarde et attend sa fin (utilisé avant un changement risqué).
+async function backupAndWait(reason, onProgress) {
+  const name = encodeURIComponent(S.sel);
+  await api(`/servers/${name}/backups?reason=${reason}`, { method: 'POST' });
+  for (let i = 0; i < 1200; i++) {            // 1 h max
+    await new Promise((r) => setTimeout(r, 2000));
+    const { job } = await api(`/servers/${name}/backups`);
+    if (onProgress) onProgress();
+    if (job?.state === 'failed') throw new Error(job.error || 'sauvegarde échouée');
+    if (job?.state === 'done') return;
+  }
+  throw new Error('délai dépassé');
+}
+
+/* ---------------------------------------------------------------- Confirmation personnalisée */
+function askModal({ title, body, check = null, confirmLabel = 'Continuer', danger = false }) {
+  return new Promise((resolve) => {
+    $('#modal').innerHTML = modalShell(`<div class="modal-head"><h2>${esc(title)}</h2></div>
+      <div class="ask-body">${body}</div>
+      ${check ? `<label class="check" style="margin:16px 0 4px"><input type="checkbox" id="ask-check" ${check.checked ? 'checked' : ''}> ${esc(check.label)}</label>` : ''}
+      <div class="ask-actions"><button class="btn" data-ask="no">Annuler</button>
+        <button class="btn ${danger ? 'danger-fill' : 'primary'}" data-ask="yes">${esc(confirmLabel)}</button></div>`);
+    const finish = (ok) => {
+      const checked = $('#ask-check')?.checked ?? false;
+      $('#modal').innerHTML = '';
+      document.removeEventListener('click', onClick, true);
+      document.removeEventListener('keydown', onKey, true);
+      resolve({ ok, checked });
+    };
+    const onClick = (e) => {
+      const b = e.target.closest?.('[data-ask]');
+      if (b) { e.stopPropagation(); finish(b.dataset.ask === 'yes'); }
+      else if (e.target.classList?.contains('modal-backdrop')) { e.stopPropagation(); finish(false); }
+    };
+    const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); finish(false); } };
+    document.addEventListener('click', onClick, true);
+    document.addEventListener('keydown', onKey, true);
+  });
+}
+
+/* Changements de type / version : peuvent rendre un monde existant illisible. */
+function versionParts(v) {
+  return /^\d+(\.\d+){1,2}$/.test(v) ? v.split('.').map(Number) : null;
+}
+function riskyChanges(oldSpec, newSpec) {
+  const o = oldSpec.env || {}, n = newSpec.env || {};
+  const ot = String(o.TYPE || 'VANILLA').toUpperCase(), nt = String(n.TYPE || 'VANILLA').toUpperCase();
+  const ov = String(o.VERSION || 'LATEST'), nv = String(n.VERSION || 'LATEST');
+  const risks = [];
+  if (ot !== nt) {
+    risks.push(`Le type passe de <b>${esc(ot)}</b> à <b>${esc(nt)}</b> : les plugins ou mods de l'ancien type ne seront plus chargés, et les objets ou blocs ajoutés par des mods peuvent disparaître du monde.`);
+  }
+  if (ov.toUpperCase() !== nv.toUpperCase()) {
+    const a = versionParts(ov), b = versionParts(nv);
+    let down = false;
+    if (a && b) { for (let i = 0; i < 3; i++) { const d = (b[i] || 0) - (a[i] || 0); if (d) { down = d < 0; break; } } }
+    risks.push(down
+      ? `La version <b>baisse</b> de ${esc(ov)} à ${esc(nv)} : <b>risque élevé</b>, Minecraft peut refuser de charger ou abîmer un monde enregistré dans une version plus récente.`
+      : `La version passe de ${esc(ov)} à ${esc(nv)} : le monde peut être converti, et un retour en arrière ne sera plus possible sans sauvegarde.`);
+  }
+  return risks;
+}
+
 /* ---------------------------------------------------------------- Mods / Plugins */
 const PLUGIN_TYPES = new Set(['PAPER', 'PURPUR', 'SPIGOT', 'BUKKIT', 'FOLIA', 'PUFFERFISH']);
 const MOD_TYPES = new Set(['FABRIC', 'FORGE', 'NEOFORGE', 'QUILT']);
@@ -517,11 +618,13 @@ function mountServer() {
   if (!s) { go('home'); return; }
   $('#main').innerHTML = `<div id="head"></div>
     <div class="tabs">
-      ${[['perf', 'activity', 'Performances'], ['console', 'terminal', 'Console'], ['files', 'box', 'Mods / Plugins'], ['settings', 'sliders', 'Paramètres']]
+      ${[['perf', 'activity', 'Performances'], ['console', 'terminal', 'Console'], ['files', 'box', 'Mods / Plugins'], ['backups', 'save', 'Sauvegardes'], ['settings', 'sliders', 'Paramètres']]
         .map(([id, icon, label]) => `<button class="tab ${S.tab === id ? 'active' : ''}" data-tab="${id}">${ic(icon, 17)}${label}</button>`).join('')}
     </div><div id="tabbody"></div>`;
   if (S.tab === 'files') {
     mountFiles(s);
+  } else if (S.tab === 'backups') {
+    mountBackups();
   } else if (S.tab === 'console') {
     $('#tabbody').innerHTML = `<pre class="console" id="log"></pre>
       <form class="cmd" id="cmd-form"><input id="cmd" placeholder="Commande (ex. list, say Bonjour, op pseudo)" autocomplete="off"><button class="btn primary">Envoyer</button></form>
@@ -577,6 +680,8 @@ async function liveServer() {
         if (el.textContent !== logs) { el.textContent = logs; if (stick) el.scrollTop = el.scrollHeight; }
       }
     } catch { /* ignoré */ }
+  } else if (S.tab === 'backups') {
+    await loadBackups();
   }
 }
 
@@ -787,6 +892,32 @@ async function watchUpdate() {
 }
 
 const ACTIONS = {
+  'backup-create': async () => {
+    try { await api(`/servers/${encodeURIComponent(S.sel)}/backups`, { method: 'POST' }); toast('Sauvegarde lancée'); }
+    catch (e) { toast(e.message, true); }
+    loadBackups();
+  },
+  'backup-del': async (btn) => {
+    const file = btn.dataset.file;
+    const { ok } = await askModal({ title: 'Supprimer la sauvegarde', confirmLabel: 'Supprimer', danger: true,
+      body: `<p style="margin:0">Supprimer définitivement cette sauvegarde ?</p><p class="hint mono" style="margin-top:8px">${esc(file)}</p>` });
+    if (!ok) return;
+    try { await api(`/servers/${encodeURIComponent(S.sel)}/backups/${encodeURIComponent(file)}`, { method: 'DELETE' }); toast('Sauvegarde supprimée'); }
+    catch (e) { toast(e.message, true); }
+    loadBackups();
+  },
+  'backup-restore': async (btn) => {
+    const file = btn.dataset.file;
+    const { ok } = await askModal({ title: 'Restaurer cette sauvegarde', confirmLabel: 'Restaurer', danger: true,
+      body: `<p style="margin:0 0 10px">Tout le contenu actuel du serveur <b>${esc(S.sel)}</b> (monde, configuration, plugins, mods) sera <b>remplacé</b> par cette sauvegarde.</p>
+        <ul class="ask-list"><li>Une sauvegarde « avant restauration » de l'état actuel est créée d'abord.</li>
+        <li>Le serveur est arrêté puis redémarré automatiquement s'il tournait.</li></ul>
+        <p class="hint mono" style="margin-top:8px">${esc(file)}</p>` });
+    if (!ok) return;
+    try { await api(`/servers/${encodeURIComponent(S.sel)}/backups/${encodeURIComponent(file)}/restore`, { method: 'POST' }); toast('Restauration lancée'); }
+    catch (e) { toast(e.message, true); }
+    loadBackups();
+  },
   'file-del': async (btn) => {
     const name = btn.dataset.name, s = server(S.sel), kind = s && filesKind(s.spec);
     if (!kind || !confirm(`Supprimer « ${name} » ?`)) return;
@@ -861,7 +992,32 @@ const ACTIONS = {
     let spec;
     try { spec = readServerForm(); } catch (e) { toast(e.message, true); return; }
     if (isNew && !$('#srv-form [data-f="eula"]').checked) { toast('Accepte l\'EULA de Minecraft pour continuer.', true); return; }
+    let backupFirst = false;
+    if (!isNew) {
+      const risks = riskyChanges(server(S.sel)?.spec || {}, spec);
+      if (risks.length) {
+        const answer = await askModal({
+          title: 'Changement risqué', confirmLabel: 'Appliquer quand même',
+          body: `<p style="margin:0 0 10px">Ce serveur existe déjà. Ce changement peut abîmer son monde :</p><ul class="ask-list">${risks.map((r) => `<li>${r}</li>`).join('')}</ul>`,
+          check: { label: 'Faire une sauvegarde avant d\'appliquer (recommandé)', checked: true },
+        });
+        if (!answer.ok) return;
+        backupFirst = answer.checked;
+      }
+    }
     btn.disabled = true; btn.innerHTML = '<span class="spin"></span> En cours…';
+    if (backupFirst) {
+      try {
+        toast('Sauvegarde du monde en cours…');
+        btn.innerHTML = '<span class="spin"></span> Sauvegarde…';
+        await backupAndWait('avant-modif');
+        btn.innerHTML = '<span class="spin"></span> En cours…';
+      } catch (e) {
+        toast(`Sauvegarde impossible, changement annulé : ${e.message}`, true);
+        btn.disabled = false; btn.innerHTML = `${ic('save')} Appliquer`;
+        return;
+      }
+    }
     toast(isNew ? 'Création… (téléchargement de l\'image si nécessaire)' : 'Application… le serveur est recréé');
     try {
       await api(isNew ? '/servers' : `/servers/${encodeURIComponent(S.sel)}`, { method: isNew ? 'POST' : 'PUT', body: spec });
