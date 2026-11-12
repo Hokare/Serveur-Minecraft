@@ -139,22 +139,36 @@ const ENFORCE_FIELD = bool('ENFORCE_WHITELIST', 'Expulser immédiatement les jou
 const KNOWN_ENV = new Set(['EULA', 'MEMORY', 'WHITELIST', 'ENABLE_WHITELIST', 'ENFORCE_WHITELIST',
   'INIT_MEMORY', 'JVM_OPTS', 'TZ', 'USE_AIKAR_FLAGS', ...SCHEMA.flatMap((g) => g.fields.map((f) => f.k))]);
 
-const plistItems = (names, act = 'list-del') => (names.length
+// Listes à ajouter / retirer : « player » (pseudos) ou « host » (noms de domaine mc-router).
+const PLIST_KINDS = {
+  player: { empty: 'Aucun joueur pour l\'instant', max: 36, re: /^[A-Za-z0-9_-]{1,36}$/, error: 'Pseudo invalide (lettres, chiffres et _ uniquement)', lower: false },
+  host: { empty: 'Aucun hostname pour l\'instant', max: 253, re: /^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$/, error: 'Hostname invalide (ex. survie.exemple.com)', lower: true },
+};
+
+const plistItems = (names, act = 'list-del', kind = 'player') => (names.length
   ? names.map((n) => `<li data-name="${esc(n)}"><span>${esc(n)}</span><button type="button" class="icon-btn" data-act="${act}" title="Retirer">${ic('trash', 18)}</button></li>`).join('')
-  : '<li class="plist-empty">Aucun joueur pour l\'instant</li>');
+  : `<li class="plist-empty">${PLIST_KINDS[kind].empty}</li>`);
+
+const plistHtml = (hiddenAttrs, names, inputId, placeholder, kind = 'player') => `<div class="plist" data-kind="${kind}">
+  <input type="hidden" ${hiddenAttrs} value="${esc(names.join(','))}">
+  <div class="plist-add"><input class="plist-input" id="${inputId}" placeholder="${esc(placeholder)}" autocomplete="off" maxlength="${PLIST_KINDS[kind].max}">
+    <button type="button" class="btn" data-act="list-add">${ic('plus')} Ajouter</button></div>
+  <ul class="plist-items">${plistItems(names, 'list-del', kind)}</ul></div>`;
 
 function plistAdd(root) {
+  const cfg = PLIST_KINDS[root.dataset.kind || 'player'];
   const input = root.querySelector('.plist-input');
   const hidden = root.querySelector('input[type=hidden]');
   const names = hidden.value ? hidden.value.split(',') : [];
   const wanted = input.value.split(/[\s,]+/).filter(Boolean);
   if (!wanted.length) return;
-  for (const n of wanted) {
-    if (!/^[A-Za-z0-9_-]{1,36}$/.test(n)) { toast(`Pseudo invalide : « ${n} » (lettres, chiffres et _ uniquement)`, true); return; }
+  for (let n of wanted) {
+    if (!cfg.re.test(n)) { toast(`${cfg.error} : « ${n} »`, true); return; }
+    if (cfg.lower) n = n.toLowerCase();
     if (!names.some((x) => x.toLowerCase() === n.toLowerCase())) names.push(n);
   }
   hidden.value = names.join(',');
-  root.querySelector('.plist-items').innerHTML = plistItems(names);
+  root.querySelector('.plist-items').innerHTML = plistItems(names, 'list-del', root.dataset.kind || 'player');
   input.value = '';
   input.focus();
 }
@@ -164,7 +178,7 @@ function plistRemove(li) {
   const hidden = root.querySelector('input[type=hidden]');
   const names = hidden.value.split(',').filter((n) => n && n !== li.dataset.name);
   hidden.value = names.join(',');
-  root.querySelector('.plist-items').innerHTML = plistItems(names);
+  root.querySelector('.plist-items').innerHTML = plistItems(names, 'list-del', root.dataset.kind || 'player');
 }
 
 function fieldHtml(f, val) {
@@ -189,11 +203,7 @@ function fieldHtml(f, val) {
       <ul class="dd-list" role="listbox" hidden>${items.map((i) => `<li role="option" data-v="${esc(i.value)}">${render(i)}</li>`).join('')}</ul></div>`;
   } else if (f.t === 'list') {
     const names = String(v).split(',').map((s) => s.trim()).filter(Boolean);
-    input = `<div class="plist">
-      <input type="hidden" ${common} value="${esc(names.join(','))}">
-      <div class="plist-add"><input class="plist-input" id="ls-${f.k}" placeholder="Pseudo du joueur" autocomplete="off" maxlength="36">
-        <button type="button" class="btn" data-act="list-add">${ic('plus')} Ajouter</button></div>
-      <ul class="plist-items">${plistItems(names)}</ul></div>`;
+    input = plistHtml(common, names, `ls-${f.k}`, 'Pseudo du joueur');
   } else {
     input = `<input ${common} type="${f.t === 'number' ? 'number' : 'text'}" value="${esc(v)}" placeholder="${esc(f.ph || '')}">`;
   }
@@ -272,10 +282,12 @@ function serverForm(spec, isNew) {
     </div>
 
     <div class="form-section"><h3>Réseau</h3><div class="fields">
-      ${inp('hosts', 'Hostname(s) mc-router', spec.hosts, 'placeholder="survie.exemple.com"', 'Les joueurs se connectent avec ce nom ; séparer par des virgules.')}
-      <div class="field"><label>&nbsp;</label><label class="check"><input type="checkbox" data-f="router_default" ${spec.router_default ? 'checked' : ''}> Serveur par défaut du routeur</label></div>
+      <div class="field wide"><label for="ls-hosts">Hostname(s) mc-router</label>
+        ${plistHtml('data-f="hosts"', (spec.hosts || '').split(',').filter(Boolean), 'ls-hosts', 'survie.exemple.com', 'host')}
+        <span class="hint">Noms de domaine avec lesquels les joueurs se connectent à ce serveur. Tu peux en ajouter plusieurs.</span></div>
+      <div class="field"><label>&nbsp;</label><label class="check"><input type="checkbox" data-f="router_default" ${spec.router_default ? 'checked' : ''}> Serveur par défaut du routeur <span class="hint">(un seul, hostname requis)</span></label></div>
       ${inp('host_port', 'Port publié (optionnel)', spec.host_port, 'type="number" min="1" max="65535" placeholder="25566"', 'Connexion directe sans routeur.')}
-      ${inp('data_path', 'Dossier de données (optionnel)', spec.data_path, `${isNew ? '' : 'disabled'} placeholder="/srv/minecraft/survie"`, 'Chemin sur l\'hôte ; vide = volume Docker nommé.')}
+      ${inp('data_path', 'Dossier de données (optionnel)', spec.data_path, `${isNew ? '' : 'disabled'} placeholder="/var/lib/docker/volumes"`, 'Vide = emplacement par défaut (en gris). Ou indique un chemin absolu sur le serveur, ex. /srv/minecraft/survie.')}
     </div></div>
 
     ${SCHEMA.map((g) => `<div class="form-section"><h3>${g.title}</h3><div class="fields">${g.fields.map((f) => fieldHtml(f, env[f.k])).join('')}${g.title === 'Joueurs' ? accessSection(spec, isNew) : ''}</div></div>`).join('')}
@@ -427,6 +439,72 @@ function liveHome() {
       <a href="#" data-nav="router" class="hint">Configurer →</a></div></div>`;
 }
 
+/* ---------------------------------------------------------------- Mods / Plugins */
+const PLUGIN_TYPES = new Set(['PAPER', 'PURPUR', 'SPIGOT', 'BUKKIT', 'FOLIA', 'PUFFERFISH']);
+const MOD_TYPES = new Set(['FABRIC', 'FORGE', 'NEOFORGE', 'QUILT']);
+
+function filesKind(spec) {
+  const type = String((spec.env || {}).TYPE || 'VANILLA').toUpperCase();
+  return PLUGIN_TYPES.has(type) ? 'plugins' : MOD_TYPES.has(type) ? 'mods' : null;
+}
+
+function mountFiles(s) {
+  const kind = filesKind(s.spec);
+  if (!kind) {
+    $('#tabbody').innerHTML = `<div class="card"><b>Ce type de serveur n'accepte ni mods ni plugins.</b>
+      <p class="hint" style="margin-top:6px">Dans l'onglet Paramètres, choisis le type <b>Paper</b> (plugins) ou <b>Fabric / Forge / NeoForge</b> (mods), puis clique sur « Appliquer ».</p></div>`;
+    return;
+  }
+  const label = kind === 'plugins' ? 'plugins' : 'mods';
+  $('#tabbody').innerHTML = `
+    <div class="card dropzone" id="dropzone">
+      <div><b>Ajouter des ${label}</b></div>
+      <p class="hint" style="margin:6px 0 14px">Glisse tes fichiers <b>.jar</b> ici, ou choisis-les depuis ton ordinateur (128 Mo max par fichier).</p>
+      <label class="btn primary">${ic('download')} Choisir des fichiers<input type="file" id="file-input" accept=".jar" multiple hidden></label>
+      <div id="upload-state" style="margin-top:12px"></div>
+    </div>
+    <div class="section-title">Installés dans le dossier ${esc(kind)}</div>
+    <div class="card" id="file-list"><div class="empty">Chargement…</div></div>
+    <p class="hint" style="margin-top:12px">Les changements sont pris en compte au prochain redémarrage du serveur.</p>`;
+  loadFiles();
+}
+
+async function loadFiles() {
+  const s = server(S.sel), kind = s && filesKind(s.spec), box = $('#file-list');
+  if (!kind || !box) return;
+  try {
+    const { files } = await api(`/servers/${encodeURIComponent(S.sel)}/files/${kind}`);
+    box.innerHTML = files.length ? `<table><thead><tr><th>Fichier</th><th>Taille</th><th></th></tr></thead><tbody>
+      ${files.map((f) => `<tr><td>${esc(f.name)}</td><td>${fmtBytes(f.size)}</td>
+        <td style="text-align:right"><button class="icon-btn" data-act="file-del" data-name="${esc(f.name)}" title="Supprimer">${ic('trash', 18)}</button></td></tr>`).join('')}</tbody></table>`
+      : `<div class="empty">Aucun fichier pour l'instant.</div>`;
+  } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
+async function uploadFiles(fileList) {
+  const s = server(S.sel), kind = s && filesKind(s.spec), state = $('#upload-state');
+  if (!kind || !state) return;
+  const files = [...fileList];
+  let ok = 0;
+  for (const [i, file] of files.entries()) {
+    if (!/\.jar$/i.test(file.name)) { toast(`« ${file.name} » ignoré : seuls les .jar sont acceptés.`, true); continue; }
+    state.innerHTML = `<div class="notice"><span class="spin"></span> Envoi de ${esc(file.name)} (${i + 1}/${files.length})…</div>`;
+    try {
+      const res = await fetch(`/api/servers/${encodeURIComponent(S.sel)}/files/${kind}?filename=${encodeURIComponent(file.name)}`,
+        { method: 'PUT', headers: { 'X-Requested-With': 'mc-panel', 'Content-Type': 'application/octet-stream' }, body: file });
+      if (!res.ok) {
+        let msg = res.statusText;
+        try { const j = await res.json(); msg = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail); } catch { /* corps non JSON */ }
+        throw new Error(msg);
+      }
+      ok++;
+    } catch (e) { toast(`${file.name} : ${e.message}`, true); }
+  }
+  state.innerHTML = ok ? `<div class="notice">${ok} fichier${ok > 1 ? 's' : ''} envoyé${ok > 1 ? 's' : ''}. Redémarre le serveur pour les charger.
+    ${isUp(server(S.sel)) ? '<button class="btn" data-act="restart" style="margin-left:auto">Redémarrer</button>' : ''}</div>` : '';
+  loadFiles();
+}
+
 /* ---------------------------------------------------------------- Serveur */
 function mountServer() {
   if (!S.sel) {                       // premier serveur, sinon formulaire de création
@@ -439,10 +517,12 @@ function mountServer() {
   if (!s) { go('home'); return; }
   $('#main').innerHTML = `<div id="head"></div>
     <div class="tabs">
-      ${[['perf', 'activity', 'Performances'], ['console', 'terminal', 'Console'], ['settings', 'sliders', 'Paramètres']]
+      ${[['perf', 'activity', 'Performances'], ['console', 'terminal', 'Console'], ['files', 'box', 'Mods / Plugins'], ['settings', 'sliders', 'Paramètres']]
         .map(([id, icon, label]) => `<button class="tab ${S.tab === id ? 'active' : ''}" data-tab="${id}">${ic(icon, 17)}${label}</button>`).join('')}
     </div><div id="tabbody"></div>`;
-  if (S.tab === 'console') {
+  if (S.tab === 'files') {
+    mountFiles(s);
+  } else if (S.tab === 'console') {
     $('#tabbody').innerHTML = `<pre class="console" id="log"></pre>
       <form class="cmd" id="cmd-form"><input id="cmd" placeholder="Commande (ex. list, say Bonjour, op pseudo)" autocomplete="off"><button class="btn primary">Envoyer</button></form>
       <div class="cmd-out" id="cmd-out"></div>`;
@@ -707,6 +787,13 @@ async function watchUpdate() {
 }
 
 const ACTIONS = {
+  'file-del': async (btn) => {
+    const name = btn.dataset.name, s = server(S.sel), kind = s && filesKind(s.spec);
+    if (!kind || !confirm(`Supprimer « ${name} » ?`)) return;
+    try { await api(`/servers/${encodeURIComponent(S.sel)}/files/${kind}?filename=${encodeURIComponent(name)}`, { method: 'DELETE' }); toast('Fichier supprimé'); }
+    catch (e) { toast(e.message, true); }
+    loadFiles();
+  },
   access: (btn) => {
     const mode = btn.dataset.mode, form = btn.closest('form');
     form.querySelector('[data-f="access_mode"]').value = mode;
@@ -809,6 +896,17 @@ const ACTIONS = {
     catch (e) { toast(e.message, true); btn.disabled = false; btn.innerHTML = `${ic('download')} Télécharger`; }
   },
 };
+
+document.addEventListener('change', (e) => {
+  if (e.target.id === 'file-input') { uploadFiles(e.target.files); e.target.value = ''; }
+});
+['dragover', 'dragleave', 'drop'].forEach((type) => document.addEventListener(type, (e) => {
+  const zone = e.target.closest?.('#dropzone');
+  if (!zone) return;
+  e.preventDefault();
+  zone.classList.toggle('over', type === 'dragover');
+  if (type === 'drop') uploadFiles(e.dataTransfer.files);
+}));
 
 const closeDropdowns = (except = null) => document.querySelectorAll('.dd-list:not([hidden])').forEach((l) => { if (l !== except) l.hidden = true; });
 

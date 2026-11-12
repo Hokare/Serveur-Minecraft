@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import shlex
 import socket
 import tarfile
@@ -10,7 +11,7 @@ import threading
 import urllib.request
 
 import docker
-from docker.errors import APIError, DockerException, ImageNotFound, NotFound
+from docker.errors import APIError, ContainerError, DockerException, ImageNotFound, NotFound
 
 from .models import RouterSpec, ServerSpec
 
@@ -18,6 +19,8 @@ NETWORK = "mc-net"
 SERVER_IMAGE = "itzg/minecraft-server"
 ROUTER_IMAGE = "itzg/mc-router"
 ROUTER_NAME = "mc-router"
+FILE_KINDS = ("plugins", "mods")
+JAR_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._+()\[\]-]{0,198}\.jar$")
 UPDATER_NAME = "mc-panel-updater"
 ROUTER_API_PORT = 25564
 STOP_TIMEOUT = 60          # laisse le serveur sauvegarder le monde
@@ -224,9 +227,27 @@ class Manager:
             kwargs["nano_cpus"] = int(spec.cpu_limit * 1_000_000_000)
         return kwargs
 
+    def check_route_conflicts(self, spec: ServerSpec) -> None:
+        """Refuse un hostname déjà pris ou un second serveur par défaut : mc-router n'a qu'une route par nom
+        et une seule route par défaut, l'une écraserait l'autre sans avertissement."""
+        mine = {h.lower() for h in spec.hosts.split(",") if h}
+        if spec.router_default and not mine:
+            raise PanelError(400, "Un serveur par défaut du routeur doit avoir au moins un hostname.")
+        for other in self.list_servers():
+            if other["name"] == spec.name:
+                continue
+            theirs = {h.lower() for h in other["spec"]["hosts"].split(",") if h}
+            clash = sorted(mine & theirs)
+            if clash:
+                raise PanelError(409, f"Le hostname « {clash[0]} » est déjà utilisé par le serveur « {other['name']} ».")
+            if spec.router_default and other["spec"].get("router_default"):
+                raise PanelError(409, f"Le serveur « {other['name']} » est déjà le serveur par défaut du routeur : "
+                                      "décoche-le d'abord sur ce serveur.")
+
     def create_server(self, spec: ServerSpec) -> dict:
         if spec.env.get("EULA", "").upper() != "TRUE":
             raise PanelError(400, "Tu dois accepter l'EULA Minecraft (EULA=TRUE).")
+        self.check_route_conflicts(spec)
         self.ensure_network()
         try:
             self.client.containers.get(self.cname(spec.name))
@@ -249,6 +270,7 @@ class Manager:
         spec.name = name
         if spec.env.get("EULA", "").upper() != "TRUE":
             raise PanelError(400, "EULA=TRUE est requis.")
+        self.check_route_conflicts(spec)
         self.ensure_image(SERVER_IMAGE, spec.image_tag)
         was_running = old.status in ("running", "restarting")
         original, backup = old.name, f"{old.name}-old"
@@ -321,6 +343,64 @@ class Manager:
         if code != 0 and not text:
             raise PanelError(502, "RCON indisponible (le serveur démarre-t-il encore ?)")
         return text
+
+    # ------------------------------------------------------------------ mods et plugins (fichiers .jar)
+    def _check_kind(self, kind: str) -> None:
+        if kind not in FILE_KINDS:
+            raise PanelError(400, "kind doit valoir plugins ou mods")
+
+    @staticmethod
+    def _check_jar_name(filename: str) -> None:
+        if not JAR_RE.match(filename):
+            raise PanelError(400, "Nom de fichier invalide : seuls les .jar (lettres, chiffres, espaces et . _ + - ( ) [ ]) sont acceptés.")
+
+    def _helper(self, c, entrypoint: list[str], command: list[str]) -> str:
+        """Exécute une commande dans un conteneur jetable qui voit le /data du serveur (même arrêté)."""
+        try:
+            out = self.client.containers.run(
+                image=c.attrs["Image"], entrypoint=entrypoint, command=command, volumes_from=[c.id],
+                network_mode="none", user="0", remove=True)
+        except ContainerError as exc:
+            raise PanelError(500, f"Opération sur les fichiers impossible : {exc.stderr.decode(errors='replace') if exc.stderr else exc}") from exc
+        except APIError as exc:
+            raise PanelError(500, exc.explanation or str(exc)) from exc
+        return out.decode("utf-8", errors="replace") if isinstance(out, bytes) else str(out)
+
+    def list_files(self, name: str, kind: str) -> list[dict]:
+        self._check_kind(kind)
+        c = self._get(name)
+        script = 'for f in "$1"/*; do [ -f "$f" ] && printf "%s\\t%s\\n" "$(wc -c < "$f")" "$(basename "$f")"; done; true'
+        out = self._helper(c, ["sh", "-c", script, "sh"], [f"/data/{kind}"])
+        files = []
+        for line in out.splitlines():
+            size, _, fname = line.partition("\t")
+            if fname and size.strip().isdigit():
+                files.append({"name": fname, "size": int(size)})
+        return sorted(files, key=lambda f: f["name"].lower())
+
+    def upload_file(self, name: str, kind: str, filename: str, data: bytes) -> None:
+        self._check_kind(kind)
+        self._check_jar_name(filename)
+        if not data.startswith(b"PK\x03\x04"):
+            raise PanelError(400, "Ce fichier n'est pas un .jar valide (archive zip attendue).")
+        c = self._get(name)
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w") as tar:
+            folder = tarfile.TarInfo(kind)
+            folder.type, folder.mode, folder.uid, folder.gid = tarfile.DIRTYPE, 0o755, 1000, 1000
+            tar.addfile(folder)
+            entry = tarfile.TarInfo(f"{kind}/{filename}")
+            entry.size, entry.mode, entry.uid, entry.gid = len(data), 0o644, 1000, 1000
+            tar.addfile(entry, io.BytesIO(data))
+        try:
+            c.put_archive("/data", buf.getvalue())
+        except APIError as exc:
+            raise PanelError(500, exc.explanation or str(exc)) from exc
+
+    def delete_file(self, name: str, kind: str, filename: str) -> None:
+        self._check_kind(kind)
+        self._check_jar_name(filename)
+        self._helper(self._get(name), ["rm", "-f", "--"], [f"/data/{kind}/{filename}"])
 
     # ------------------------------------------------------------------ joueurs bannis (liste noire)
     def banned_players(self, name: str) -> list[str]:

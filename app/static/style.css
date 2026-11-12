@@ -176,6 +176,9 @@ td.mono, .mono { font-family: var(--mono); font-size: 13px; }
 .seg-btn { border: 0; background: none; padding: 7px 16px; border-radius: 99px; cursor: pointer; color: var(--ink-2); font-size: 14px; }
 .seg-btn.on { background: var(--ink); color: #fff; }
 .access-pane[hidden] { display: none; }
+.dropzone { border-style: dashed; border-width: 2px; text-align: center; padding: 26px 20px; transition: background .15s; }
+.dropzone.over { background: #efebe0; border-color: var(--ink); }
+.dropzone .notice { text-align: left; }
 .plist-add { display: flex; gap: 10px; }
 .plist-add input { flex: 1; }
 .plist-items { list-style: none; margin: 10px 0 0; padding: 0; border: 1px solid var(--line); border-radius: 12px; background: #fff; overflow-y: auto; max-height: 234px; }   /* ≈ 5 lignes, ensuite on défile */

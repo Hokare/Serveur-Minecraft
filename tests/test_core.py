@@ -73,6 +73,82 @@ def test_updater_mounts_project_at_its_real_host_path(monkeypatch):
     assert "--project-directory /root/Serveur-Minecraft" in cmd and "-f /root/Serveur-Minecraft/docker-compose.yml" in cmd
 
 
+def test_route_conflicts(monkeypatch):
+    from app.dockerops import Manager, PanelError
+    m = Manager()
+    existing = ServerSpec(name="survie", hosts="survie.exemple.com,play.exemple.com", router_default=True).model_dump()
+    monkeypatch.setattr(m, "list_servers", lambda: [{"name": "survie", "spec": existing}])
+
+    def check(**kw):
+        m.check_route_conflicts(ServerSpec(**{"name": "creatif", **kw}))
+
+    check(hosts="creatif.exemple.com")                              # aucun conflit
+    check(hosts="creatif.exemple.com", router_default=False)
+    with pytest.raises(PanelError) as e:
+        check(hosts="PLAY.exemple.com")                              # même nom, casse différente
+    assert e.value.status == 409 and "survie" in e.value.message
+    with pytest.raises(PanelError) as e:
+        check(hosts="creatif.exemple.com", router_default=True)      # second serveur par défaut
+    assert e.value.status == 409 and "par défaut" in e.value.message
+    with pytest.raises(PanelError) as e:
+        check(router_default=True)                                   # défaut sans hostname
+    assert e.value.status == 400
+    # modifier le serveur existant ne doit pas entrer en conflit avec lui-même
+    m.check_route_conflicts(ServerSpec(name="survie", hosts="survie.exemple.com", router_default=True))
+
+
+def _manager_with_server(monkeypatch):
+    import io as _io
+    from types import SimpleNamespace
+    from app.dockerops import Manager
+
+    captured = {}
+    container = SimpleNamespace(
+        id="abc", attrs={"Image": "sha256:img"},
+        labels={"mc-panel.managed": "true", "mc-panel.kind": "server"},
+        put_archive=lambda path, data: captured.update(path=path, data=data))
+    m = Manager()
+    m._client = SimpleNamespace(containers=SimpleNamespace(get=lambda n: container))
+    return m, captured
+
+
+def test_upload_builds_owned_tar_and_validates(monkeypatch):
+    import io as _io
+    import tarfile
+    from app.dockerops import PanelError
+
+    m, captured = _manager_with_server(monkeypatch)
+    jar = b"PK\x03\x04" + b"0" * 100
+    m.upload_file("survie", "plugins", "Mon Plugin-1.2.jar", jar)
+    assert captured["path"] == "/data"
+    with tarfile.open(fileobj=_io.BytesIO(captured["data"])) as tar:
+        members = {t.name: t for t in tar.getmembers()}
+        assert set(members) == {"plugins", "plugins/Mon Plugin-1.2.jar"}
+        assert members["plugins/Mon Plugin-1.2.jar"].uid == 1000 and members["plugins/Mon Plugin-1.2.jar"].size == len(jar)
+    for bad_name in ("../evil.jar", "a/b.jar", "notes.txt", ".hidden.jar", "x.jar.exe"):
+        with pytest.raises(PanelError) as e:
+            m.upload_file("survie", "plugins", bad_name, jar)
+        assert e.value.status == 400
+    with pytest.raises(PanelError):
+        m.upload_file("survie", "plugins", "fake.jar", b"MZ not a zip")
+    with pytest.raises(PanelError):
+        m.upload_file("survie", "config", "ok.jar", jar)
+
+
+def test_list_and_delete_files(monkeypatch):
+    m, _ = _manager_with_server(monkeypatch)
+    calls = []
+
+    def fake_helper(c, entrypoint, command):
+        calls.append((entrypoint, command))
+        return "123\tZeta.jar\n456\tbeta plugin.jar\nbruit sans tab\n"
+
+    monkeypatch.setattr(m, "_helper", fake_helper)
+    assert m.list_files("survie", "mods") == [{"name": "beta plugin.jar", "size": 456}, {"name": "Zeta.jar", "size": 123}]
+    m.delete_file("survie", "mods", "Zeta.jar")
+    assert calls[-1] == (["rm", "-f", "--"], ["/data/mods/Zeta.jar"])
+
+
 def test_router_spec():
     assert RouterSpec().host_port == 25565
     with pytest.raises(ValidationError):

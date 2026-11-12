@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -113,6 +114,34 @@ def server_logs(name: str, tail: int = 300):
 @app.post("/api/servers/{name}/command")
 def server_command(name: str, body: CommandBody):
     return {"output": manager.command(name, body.command)}
+
+
+MAX_UPLOAD = int(os.environ.get("PANEL_MAX_UPLOAD_MB", "128")) * 1024 * 1024
+
+
+@app.get("/api/servers/{name}/files/{kind}")
+def list_files(name: str, kind: str):
+    return {"files": manager.list_files(name, kind)}
+
+
+@app.put("/api/servers/{name}/files/{kind}")
+async def upload_file(name: str, kind: str, filename: str, request: Request):
+    """Envoi d'un .jar : le fichier est le corps brut de la requête (pas de multipart)."""
+    if int(request.headers.get("content-length") or 0) > MAX_UPLOAD:
+        raise PanelError(413, f"Fichier trop gros (limite {MAX_UPLOAD // 1024 // 1024} Mo).")
+    data = bytearray()
+    async for chunk in request.stream():
+        data.extend(chunk)
+        if len(data) > MAX_UPLOAD:
+            raise PanelError(413, f"Fichier trop gros (limite {MAX_UPLOAD // 1024 // 1024} Mo).")
+    await run_in_threadpool(manager.upload_file, name, kind, filename, bytes(data))
+    return {"ok": True}
+
+
+@app.delete("/api/servers/{name}/files/{kind}")
+def delete_file(name: str, kind: str, filename: str):
+    manager.delete_file(name, kind, filename)
+    return {"ok": True}
 
 
 @app.get("/api/servers/{name}/banned")

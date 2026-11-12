@@ -59,6 +59,17 @@ def test_specific_post_routes_not_shadowed_by_generic_action(client, monkeypatch
     assert calls == [("cmd", "list"), ("cmd", "ban Troll"), ("cmd", "pardon Troll"), ("action", "restart")]
 
 
+def test_upload_endpoint_streams_body_and_enforces_limit(client, monkeypatch):
+    from app import main
+    got = {}
+    monkeypatch.setattr(main.manager, "upload_file", lambda n, k, f, d: got.update(name=n, kind=k, filename=f, size=len(d)))
+    r = client.put("/api/servers/survie/files/mods?filename=a.jar", headers=w(), content=b"PK\x03\x04" + b"x" * 50)
+    assert r.status_code == 200 and got == {"name": "survie", "kind": "mods", "filename": "a.jar", "size": 54}
+    monkeypatch.setattr(main, "MAX_UPLOAD", 10)
+    assert client.put("/api/servers/survie/files/mods?filename=a.jar", headers=w(), content=b"x" * 50).status_code == 413
+    assert client.put("/api/servers/survie/files/mods?filename=a.jar", content=b"x").status_code == 401
+
+
 def test_static_index_served(client):
     r = client.get("/", headers=basic())
     assert "MC Panel" in r.text and r.headers["cache-control"] == "no-cache"
