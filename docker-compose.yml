@@ -1,0 +1,20 @@
+services:
+  panel:
+    build: .
+    container_name: mc-panel
+    restart: unless-stopped
+    environment:
+      PANEL_USER: ${PANEL_USER:-admin}
+      PANEL_PASSWORD: ${PANEL_PASSWORD:?définis PANEL_PASSWORD dans .env}
+    ports:
+      # Local uniquement. Pour l'exposer, place-le derrière un reverse proxy HTTPS.
+      - "127.0.0.1:8080:8080"
+    volumes:
+      # Accès complet à Docker = équivalent root sur l'hôte : garde le mot de passe fort.
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - mc-net   # permet au panel de « pinger » les serveurs (joueurs, latence)
+
+networks:
+  mc-net:
+    name: mc-net
