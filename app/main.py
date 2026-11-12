@@ -78,7 +78,7 @@ def _with_stats(server: dict) -> dict:
 def overview():
     if not manager.available():
         return {"docker": {"ok": False, "error": "Docker injoignable (socket /var/run/docker.sock ?)"},
-                "host": host_stats(), "servers": [], "router": None}
+                "host": host_stats(), "servers": [], "router": None, "default_password": auth.default_password}
     router = manager.get_router()
     router["stats"] = monitor.latest(ROUTER_KEY)
     return {
@@ -86,6 +86,7 @@ def overview():
         "host": host_stats(),
         "servers": [_with_stats(s) for s in manager.list_servers()],
         "router": router,
+        "default_password": auth.default_password,
     }
 
 

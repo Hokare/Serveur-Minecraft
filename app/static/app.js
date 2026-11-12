@@ -365,6 +365,17 @@ function chart(points, series, { max = null, floor = 0 } = {}) {
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${grid}${paths}</svg>`;
 }
 
+// Bandeau d'alerte tant que le mot de passe est encore celui par défaut (admin / admin).
+function renderWarn() {
+  const el = $('#warn');
+  if (!el) return;
+  const show = !!S.ov?.default_password;
+  if (el.hidden === !show && (!show || el.childElementCount)) return;
+  el.hidden = !show;
+  el.innerHTML = show ? `<span><b>Mot de passe par défaut (admin / admin).</b> Change-le pour protéger ton serveur.</span>
+    <button class="btn" data-act="profile">Changer maintenant</button>` : '';
+}
+
 /* ======================================================================
    Rail et panneau de liste
    ====================================================================== */
@@ -945,6 +956,7 @@ async function updateLive() {
 
 async function tick() {
   try { S.ov = await api('/overview'); S.err = null; } catch (e) { S.err = e.message; }
+  renderWarn();
   renderRail(); renderPanel();
   if (S.view === 'server' && S.ov && !server(S.sel)) { go('home'); return; }
   if (S.view === 'fs' && S.ov && S.sel && !server(S.sel)) { go('fs'); return; }

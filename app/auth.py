@@ -2,7 +2,7 @@
 
 Le mot de passe est stocké haché (scrypt + sel) dans `<PANEL_DATA_DIR>/auth.json`.
 Au premier démarrage : PANEL_PASSWORD (s'il est défini) sert de mot de passe initial,
-sinon un mot de passe aléatoire est généré et affiché dans les journaux.
+sinon les identifiants par défaut sont admin / admin (l'interface avertit tant qu'ils n'ont pas été changés).
 Ensuite le fichier fait foi et PANEL_PASSWORD est ignoré.
 """
 from __future__ import annotations
@@ -20,6 +20,7 @@ from pathlib import Path
 
 log = logging.getLogger("mc-panel.auth")
 
+DEFAULT_PASSWORD = "admin"
 MIN_PASSWORD = 8
 USER_RE = re.compile(r"^[A-Za-z0-9_.-]{3,32}$")
 
@@ -38,6 +39,8 @@ class AuthStore:
         self._ok: set[str] = set()      # en-têtes déjà validés (évite un scrypt par requête)
         if not self._load():
             self._bootstrap(initial_password)
+        # Vrai tant que le mot de passe est encore « admin » : l'interface affiche alors un avertissement.
+        self.default_password = self.verify(self.user, DEFAULT_PASSWORD)
 
     # -- persistance
     def _load(self) -> bool:
@@ -71,10 +74,10 @@ class AuthStore:
     def _bootstrap(self, initial_password: str) -> None:
         password = initial_password
         if not password:
-            password = secrets.token_urlsafe(12)
+            password = DEFAULT_PASSWORD
             log.warning("=" * 60)
-            log.warning("Mot de passe initial généré — utilisateur : %s  mot de passe : %s", self.user, password)
-            log.warning("Change-le depuis le menu profil de l'interface.")
+            log.warning("Identifiants par défaut : %s / %s — change-les depuis le menu profil de l'interface.",
+                        self.user, DEFAULT_PASSWORD)
             log.warning("=" * 60)
         self._set(password)
         self._save()
@@ -123,5 +126,6 @@ class AuthStore:
                 self.user = new_user
             if new_password:
                 self._set(new_password)
+                self.default_password = new_password == DEFAULT_PASSWORD
             self._ok.clear()
         self._save()

@@ -16,11 +16,11 @@ Prérequis : Linux avec Docker (et le plugin Compose).
 ```bash
 git clone https://github.com/Hokare/Serveur-Minecraft.git && cd Serveur-Minecraft
 docker compose up -d --build
-docker logs mc-panel          # affiche le mot de passe initial généré
 ```
 
-Ouvre <http://127.0.0.1:8080> (utilisateur `admin`). Pour choisir toi-même le mot de passe initial,
-mets `PANEL_PASSWORD=...` (et éventuellement `PANEL_USER=...`) dans un fichier `.env` avant le premier lancement.
+Ouvre <http://127.0.0.1:8080> et connecte-toi avec **admin / admin** (identifiants par défaut). Un bandeau rouge te rappelle de les changer
+dans le menu profil tant que c'est le cas. Pour choisir toi-même les identifiants initiaux, mets `PANEL_USER=...` et `PANEL_PASSWORD=...`
+dans un fichier `.env` avant le premier lancement.
 
 > Le panel est construit **depuis GitHub** (`main`) : le code doit donc être poussé sur le dépôt.
 > Pour construire depuis le dossier local, mets `PANEL_BUILD_CONTEXT=.` dans `.env`.
@@ -56,7 +56,7 @@ Clique sur le cercle **MC** en bas à gauche :
 - **Compte** : change le nom d'utilisateur et/ou le mot de passe (le mot de passe actuel est demandé).
   Ils sont stockés hachés dans le volume `mc-panel-data`. Après le changement, le navigateur te redemande de te connecter.
   Si tu perds le mot de passe : `docker compose down -v` n'est **pas** nécessaire, supprime juste `auth.json` :
-  `docker exec mc-panel rm /data/auth.json && docker restart mc-panel` (un nouveau mot de passe est généré dans les logs).
+  `docker exec mc-panel rm /data/auth.json && docker restart mc-panel` (les identifiants reviennent à `admin` / `admin`, ou à `PANEL_USER` / `PANEL_PASSWORD` s'ils sont définis).
 - **Logiciel** : compare la version installée au dernier commit GitHub. « Mettre à jour » lance un conteneur
   temporaire `mc-panel-updater` qui reconstruit le panel puis le recrée ; la page se recharge toute seule.
   Tes serveurs Minecraft et le routeur ne sont pas touchés.
@@ -83,16 +83,11 @@ PANEL_PASSWORD=dev python -m app        # http://127.0.0.1:8080 (données dans .
 
 Le panel pilote Docker : y accéder équivaut à être root sur la machine.
 
-- L'authentification (HTTP Basic) est toujours active : sans `PANEL_PASSWORD`, un mot de passe aléatoire est généré au premier démarrage.
+- L'authentification (HTTP Basic) est toujours active : sans `PANEL_PASSWORD`, les identifiants par défaut sont `admin` / `admin`. **Change-les dès la première connexion** : le panel pilote Docker,
+donc quiconque l'atteint avec ces identifiants contrôle ta machine. Ne l'expose jamais sur Internet tant qu'ils n'ont pas changé.
 - Le port est publié sur `127.0.0.1` uniquement. Pour un accès distant, place-le derrière un reverse proxy **HTTPS** (Caddy, Traefik, nginx) ou un tunnel SSH : `ssh -L 8080:127.0.0.1:8080 serveur`.
 - Les requêtes d'écriture exigent l'en-tête `X-Requested-With` (anti-CSRF).
 - Redirige le port 25565 (routeur) sur ta box, jamais le port 8080.
-
-## Tests
-
-```bash
-pip install pytest httpx && python -m pytest tests
-```
 
 ## Limites connues / pistes
 

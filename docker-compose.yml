@@ -13,8 +13,8 @@ services:
     restart: unless-stopped
     environment:
       PANEL_USER: ${PANEL_USER:-admin}
-      # Mot de passe initial (facultatif). Sans lui, un mot de passe aléatoire est généré
-      # et affiché dans `docker logs mc-panel`. Ensuite il se change depuis l'interface.
+      # Mot de passe initial (facultatif). Sans lui, les identifiants par défaut sont admin / admin.
+      # Dans tous les cas, ils se changent depuis le menu profil de l'interface.
       PANEL_PASSWORD: ${PANEL_PASSWORD:-}
       PANEL_REPO: ${PANEL_REPO:-Hokare/Serveur-Minecraft}
       PANEL_TRACK: ${PANEL_TRACK:-main}
