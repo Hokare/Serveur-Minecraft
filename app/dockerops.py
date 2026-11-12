@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import io
 import json
+import shlex
 import socket
 import tarfile
 import threading
@@ -373,15 +374,20 @@ class Manager:
         if self.updater_status()["state"] == "running":
             raise PanelError(409, "Une mise à jour est déjà en cours.")
         self.cleanup_updater()
+        if not project.startswith("/"):
+            raise PanelError(501, f"Chemin de projet inattendu : {project}")
         try:
+            # Le dossier est monté au MÊME chemin que sur l'hôte : compose résout `.:/project` côté client,
+            # le démon Docker doit donc recevoir le vrai chemin de l'hôte (et non un chemin interne).
             self.client.containers.run(
                 image=me.attrs["Image"],          # même image : elle embarque docker + compose
                 name=UPDATER_NAME,
-                command=["sh", "-c", "sleep 3 && docker compose -f /project/docker-compose.yml up -d --build"],
+                command=["sh", "-c", f"sleep 3 && docker compose --project-directory {shlex.quote(project)} "
+                                     f"-f {shlex.quote(project + '/docker-compose.yml')} up -d --build"],
                 environment=env,
-                working_dir="/project",
+                working_dir=project,
                 volumes={
-                    project: {"bind": "/project", "mode": "ro"},
+                    project: {"bind": project, "mode": "ro"},
                     "/var/run/docker.sock": {"bind": "/var/run/docker.sock", "mode": "rw"},
                 },
                 detach=True,

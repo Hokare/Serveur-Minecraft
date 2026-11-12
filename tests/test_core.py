@@ -42,6 +42,37 @@ def test_legacy_spec_with_whitelist_stays_whitelisted():
     assert ServerSpec(name="a", env={"EULA": "TRUE"}).access_mode == "none"
 
 
+def test_updater_mounts_project_at_its_real_host_path(monkeypatch):
+    """Régression : compose résout `.:/project` côté client, le chemin hôte doit donc rester identique."""
+    import socket as _socket
+    from types import SimpleNamespace
+    from docker.errors import NotFound
+    from app.dockerops import Manager
+
+    me = SimpleNamespace(attrs={"Image": "sha256:abc", "Mounts": [
+        {"Destination": "/project", "Source": "/root/Serveur-Minecraft"}]})
+    captured = {}
+
+    class Containers:
+        def get(self, name):
+            if name == "me":
+                return me
+            raise NotFound("absent")
+
+        def run(self, **kwargs):
+            captured.update(kwargs)
+
+    m = Manager()
+    m._client = SimpleNamespace(containers=Containers())
+    monkeypatch.setattr(_socket, "gethostname", lambda: "me")
+    assert m.updater_supported()
+    m.launch_updater({"APP_SHA": "x"})
+    assert captured["volumes"]["/root/Serveur-Minecraft"]["bind"] == "/root/Serveur-Minecraft"
+    assert captured["working_dir"] == "/root/Serveur-Minecraft"
+    cmd = captured["command"][-1]
+    assert "--project-directory /root/Serveur-Minecraft" in cmd and "-f /root/Serveur-Minecraft/docker-compose.yml" in cmd
+
+
 def test_router_spec():
     assert RouterSpec().host_port == 25565
     with pytest.raises(ValidationError):
