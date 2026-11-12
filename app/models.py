@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,30}$")
 ENV_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -45,7 +45,18 @@ class ServerSpec(BaseModel):
     router_default: bool = False        # serveur par défaut de mc-router
     data_path: str | None = None        # dossier hôte (sinon volume nommé)
     restart: RestartPolicy = "unless-stopped"
+    access_mode: Literal["none", "whitelist", "blacklist"] = "none"   # contrôle d'accès des joueurs
     env: dict[str, str] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _legacy_access_mode(cls, data):
+        """Serveurs créés avant l'option : une liste blanche dans l'environnement reste active."""
+        if isinstance(data, dict) and "access_mode" not in data:
+            env = data.get("env") or {}
+            if env.get("WHITELIST") or str(env.get("ENABLE_WHITELIST", "")).upper() == "TRUE":
+                data = {**data, "access_mode": "whitelist"}
+        return data
 
     @field_validator("name")
     @classmethod
@@ -113,6 +124,10 @@ class AccountUpdate(BaseModel):
     current_password: str = Field(min_length=1, max_length=128)
     new_username: str | None = Field(default=None, max_length=64)
     new_password: str | None = Field(default=None, max_length=128)
+
+
+class PlayerBody(BaseModel):
+    player: str = Field(pattern=r"^[A-Za-z0-9_-]{1,36}$")
 
 
 class CommandBody(BaseModel):

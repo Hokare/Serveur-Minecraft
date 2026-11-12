@@ -1,8 +1,10 @@
 """Opérations Docker : serveurs itzg/minecraft-server et routeur itzg/mc-router."""
 from __future__ import annotations
 
+import io
 import json
 import socket
+import tarfile
 import threading
 import urllib.request
 
@@ -180,6 +182,11 @@ class Manager:
     def build_env(spec: ServerSpec) -> dict[str, str]:
         env = dict(spec.env)
         env["MEMORY"] = spec.memory
+        if spec.access_mode == "whitelist":
+            env["ENABLE_WHITELIST"] = "TRUE"
+        else:   # la liste blanche n'est active que dans ce mode
+            for key in ("WHITELIST", "ENABLE_WHITELIST", "ENFORCE_WHITELIST"):
+                env.pop(key, None)
         return env
 
     def _server_kwargs(self, spec: ServerSpec) -> dict:
@@ -313,6 +320,26 @@ class Manager:
         if code != 0 and not text:
             raise PanelError(502, "RCON indisponible (le serveur démarre-t-il encore ?)")
         return text
+
+    # ------------------------------------------------------------------ joueurs bannis (liste noire)
+    def banned_players(self, name: str) -> list[str]:
+        """Lit banned-players.json dans le conteneur (fonctionne aussi serveur arrêté)."""
+        c = self._get(name)
+        try:
+            stream, _ = c.get_archive("/data/banned-players.json")
+            raw = b"".join(stream)
+            with tarfile.open(fileobj=io.BytesIO(raw)) as tar:
+                member = tar.getmembers()[0]
+                entries = json.load(tar.extractfile(member))
+        except NotFound:
+            return []
+        except (tarfile.TarError, ValueError, IndexError, AttributeError, TypeError):
+            raise PanelError(500, "banned-players.json illisible")
+        return sorted((e.get("name", "") for e in entries if isinstance(e, dict) and e.get("name")), key=str.lower)
+
+    def ban(self, name: str, player: str, pardon: bool = False) -> None:
+        verb = "pardon" if pardon else "ban"
+        self.command(name, f"{verb} {player}")
 
     # ------------------------------------------------------------------ mise à jour du panel
     def _self_container(self):

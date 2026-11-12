@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from . import system
 from .auth import AuthStore
 from .dockerops import ROUTER_IMAGE, SERVER_IMAGE, Manager, PanelError
-from .models import AccountUpdate, CommandBody, RouterSpec, ServerSpec
+from .models import AccountUpdate, CommandBody, PlayerBody, RouterSpec, ServerSpec
 from .monitor import ROUTER_KEY, Monitor, host_stats
 
 log = logging.getLogger("mc-panel")
@@ -99,11 +99,6 @@ def update_server(name: str, spec: ServerSpec):
     return manager.update_server(name, spec)
 
 
-@app.post("/api/servers/{name}/{action}")
-def server_action(name: str, action: str):
-    return manager.action(name, action)
-
-
 @app.delete("/api/servers/{name}")
 def delete_server(name: str, remove_data: bool = False):
     manager.delete_server(name, remove_data)
@@ -120,9 +115,32 @@ def server_command(name: str, body: CommandBody):
     return {"output": manager.command(name, body.command)}
 
 
+@app.get("/api/servers/{name}/banned")
+def banned(name: str):
+    return {"players": manager.banned_players(name)}
+
+
+@app.post("/api/servers/{name}/ban")
+def ban_player(name: str, body: PlayerBody):
+    manager.ban(name, body.player)
+    return {"players": manager.banned_players(name)}
+
+
+@app.post("/api/servers/{name}/pardon")
+def pardon_player(name: str, body: PlayerBody):
+    manager.ban(name, body.player, pardon=True)
+    return {"players": manager.banned_players(name)}
+
+
 @app.get("/api/servers/{name}/stats")
 def server_stats(name: str):
     return {"points": monitor.history(name)}
+
+
+# À déclarer en dernier : cette route générique capturerait sinon /command, /ban, /pardon.
+@app.post("/api/servers/{name}/{action}")
+def server_action(name: str, action: str):
+    return manager.action(name, action)
 
 
 # --------------------------------------------------------------------------- routeur

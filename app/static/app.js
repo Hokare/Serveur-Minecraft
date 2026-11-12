@@ -8,6 +8,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 const ICONS = {
   plus: '<path d="M12 5v14M5 12h14"/>',
+  chevron: '<path d="M6 9l6 6 6-6"/>',
   search: '<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/>',
   home: '<path d="M3.5 11.5L12 4l8.5 7.5"/><path d="M5.5 10v9.5h13V10"/><path d="M10 19.5v-5h4v5"/>',
   server: '<rect x="3.5" y="4" width="17" height="6.5" rx="2"/><rect x="3.5" y="13.5" width="17" height="6.5" rx="2"/><path d="M7.5 7.25h.01M7.5 16.75h.01"/>',
@@ -112,31 +113,59 @@ const SCHEMA = [
     { k: 'MAX_WORLD_SIZE', label: 'Taille max du monde', t: 'number' },
   ] },
   { title: 'Joueurs', fields: [
-    { k: 'OPS', label: 'Opérateurs', t: 'text', wide: true, hint: 'Pseudos séparés par des virgules.' },
-    { k: 'WHITELIST', label: 'Liste blanche', t: 'text', wide: true, hint: 'Pseudos séparés par des virgules.' },
-    bool('ENABLE_WHITELIST', 'Activer la liste blanche'), bool('ENFORCE_WHITELIST', 'Appliquer strictement la liste blanche'),
-  ] },
-  { title: 'Java', fields: [
-    { k: 'INIT_MEMORY', label: 'Mémoire initiale (Xms)', t: 'text', ph: '1G' },
-    { k: 'JVM_OPTS', label: 'Options JVM', t: 'text', wide: true },
-    { k: 'TZ', label: 'Fuseau horaire', t: 'text', ph: 'Europe/Paris' },
-    bool('USE_AIKAR_FLAGS', 'Flags Aikar (optimisation GC)'),
+    { k: 'OPS', label: 'Opérateurs', t: 'list', wide: true },
   ] },
 ];
+
+// Champs affichés dans la section « Ressources et performances » (et non dans SCHEMA).
+const INIT_FIELD = { k: 'INIT_MEMORY', label: 'Mémoire réservée au démarrage', t: 'text', ph: 'ex. 1G',
+  hint: 'Optionnel. La même valeur que la mémoire maximale évite les ralentissements en cours de jeu.' };
+const AIKAR_FIELD = { ...bool('USE_AIKAR_FLAGS', 'Optimisation anti-saccades (flags Aikar)'),
+  hint: 'Réglages Java recommandés pour Paper/Spigot, utiles à partir de 4G.' };
+const JVM_FIELD = { k: 'JVM_OPTS', label: 'Options Java supplémentaires', t: 'text', wide: true,
+  hint: 'Avancé : arguments passés à Java. Laisse vide en cas de doute.' };
+const TZ_FIELD = { k: 'TZ', label: 'Fuseau horaire', t: 'text', ph: 'Europe/Paris',
+  hint: 'Heure utilisée dans les journaux du serveur.' };
 // Valeurs appliquées par itzg/minecraft-server quand la variable n'est pas définie.
 const DEFAULTS = {
   TYPE: 'VANILLA', MODE: 'survival', DIFFICULTY: 'easy',
   HARDCORE: 'FALSE', PVP: 'TRUE', ONLINE_MODE: 'TRUE', ALLOW_NETHER: 'TRUE', ALLOW_FLIGHT: 'FALSE',
-  ENABLE_COMMAND_BLOCK: 'FALSE', FORCE_GAMEMODE: 'FALSE', ENABLE_WHITELIST: 'FALSE', ENFORCE_WHITELIST: 'FALSE',
+  ENABLE_COMMAND_BLOCK: 'FALSE', FORCE_GAMEMODE: 'FALSE', ENFORCE_WHITELIST: 'FALSE',
   USE_AIKAR_FLAGS: 'FALSE',
 };
-const defaultLabel = (f) => {
-  const d = DEFAULTS[f.k];
-  if (!d) return '(défaut)';
-  return `${f.t === 'bool' ? (d === 'TRUE' ? 'Oui' : 'Non') : d} (défaut)`;
-};
 
-const KNOWN_ENV =new Set(['EULA', 'MEMORY', ...SCHEMA.flatMap((g) => g.fields.map((f) => f.k))]);
+const WHITELIST_FIELD = { k: 'WHITELIST', label: 'Joueurs autorisés', t: 'list', wide: true };
+const ENFORCE_FIELD = bool('ENFORCE_WHITELIST', 'Expulser immédiatement les joueurs retirés de la liste');
+const KNOWN_ENV = new Set(['EULA', 'MEMORY', 'WHITELIST', 'ENABLE_WHITELIST', 'ENFORCE_WHITELIST',
+  'INIT_MEMORY', 'JVM_OPTS', 'TZ', 'USE_AIKAR_FLAGS', ...SCHEMA.flatMap((g) => g.fields.map((f) => f.k))]);
+
+const plistItems = (names, act = 'list-del') => (names.length
+  ? names.map((n) => `<li data-name="${esc(n)}"><span>${esc(n)}</span><button type="button" class="icon-btn" data-act="${act}" title="Retirer">${ic('trash', 18)}</button></li>`).join('')
+  : '<li class="plist-empty">Aucun joueur pour l\'instant</li>');
+
+function plistAdd(root) {
+  const input = root.querySelector('.plist-input');
+  const hidden = root.querySelector('input[type=hidden]');
+  const names = hidden.value ? hidden.value.split(',') : [];
+  const wanted = input.value.split(/[\s,]+/).filter(Boolean);
+  if (!wanted.length) return;
+  for (const n of wanted) {
+    if (!/^[A-Za-z0-9_-]{1,36}$/.test(n)) { toast(`Pseudo invalide : « ${n} » (lettres, chiffres et _ uniquement)`, true); return; }
+    if (!names.some((x) => x.toLowerCase() === n.toLowerCase())) names.push(n);
+  }
+  hidden.value = names.join(',');
+  root.querySelector('.plist-items').innerHTML = plistItems(names);
+  input.value = '';
+  input.focus();
+}
+
+function plistRemove(li) {
+  const root = li.closest('.plist');
+  const hidden = root.querySelector('input[type=hidden]');
+  const names = hidden.value.split(',').filter((n) => n && n !== li.dataset.name);
+  hidden.value = names.join(',');
+  root.querySelector('.plist-items').innerHTML = plistItems(names);
+}
 
 function fieldHtml(f, val) {
   const v = val ?? '';
@@ -144,17 +173,69 @@ function fieldHtml(f, val) {
   let input;
   if (f.t === 'select' || f.t === 'bool') {
     const opts = f.t === 'bool' ? [['TRUE', 'Oui'], ['FALSE', 'Non']] : f.opts.map((o) => [o, o]);
-    const cur = f.t === 'bool' ? String(v).toUpperCase() : v;
+    let cur = f.t === 'bool' ? String(v).toUpperCase() : v;
     if (cur && !opts.some(([o]) => o === cur)) opts.push([cur, cur]);
-    input = `<select ${common} class="${cur ? '' : 'is-default'}"><option value="">${esc(defaultLabel(f))}</option>${opts.map(([o, l]) => `<option value="${esc(o)}" ${o === cur ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
+    // Une seule entrée par valeur : l'entrée qui correspond à la valeur par défaut (valeur '' = non définie)
+    // porte le suffixe « (défaut) » en gris. Sans valeur par défaut connue, on garde une entrée « (défaut) ».
+    const def = DEFAULTS[f.k];
+    const items = opts.map(([o, l]) => ({ value: o === def ? '' : o, label: l, isDef: o === def }));
+    if (def === undefined) items.unshift({ value: '', label: '(défaut)', grey: true });
+    if (cur === def) cur = '';
+    const sel = items.find((i) => i.value === cur) || items[0];
+    const render = (i) => (i.grey ? `<span class="grey">${esc(i.label)}</span>` : `${esc(i.label)}${i.isDef ? ' <span class="grey">(défaut)</span>' : ''}`);
+    input = `<div class="dd">
+      <input type="hidden" ${common} value="${esc(sel.value)}">
+      <button type="button" class="dd-btn" id="dd-${f.k}" aria-haspopup="listbox"><span class="dd-text">${render(sel)}</span>${ic('chevron')}</button>
+      <ul class="dd-list" role="listbox" hidden>${items.map((i) => `<li role="option" data-v="${esc(i.value)}">${render(i)}</li>`).join('')}</ul></div>`;
+  } else if (f.t === 'list') {
+    const names = String(v).split(',').map((s) => s.trim()).filter(Boolean);
+    input = `<div class="plist">
+      <input type="hidden" ${common} value="${esc(names.join(','))}">
+      <div class="plist-add"><input class="plist-input" id="ls-${f.k}" placeholder="Pseudo du joueur" autocomplete="off" maxlength="36">
+        <button type="button" class="btn" data-act="list-add">${ic('plus')} Ajouter</button></div>
+      <ul class="plist-items">${plistItems(names)}</ul></div>`;
   } else {
     input = `<input ${common} type="${f.t === 'number' ? 'number' : 'text'}" value="${esc(v)}" placeholder="${esc(f.ph || '')}">`;
   }
-  return `<div class="field${f.wide ? ' wide' : ''}"><label for="env-${f.k}">${esc(f.label)}</label>${input}${f.hint ? `<span class="hint">${esc(f.hint)}</span>` : ''}</div>`;
+  return `<div class="field${f.wide ? ' wide' : ''}"><label for="${{ list: 'ls-', select: 'dd-', bool: 'dd-' }[f.t] || 'env-'}${f.k}">${esc(f.label)}</label>${input}${f.hint ? `<span class="hint">${esc(f.hint)}</span>` : ''}</div>`;
+}
+
+const ACCESS_MODES = [['none', 'Aucune'], ['whitelist', 'Liste blanche'], ['blacklist', 'Liste noire']];
+
+function accessSection(spec, isNew) {
+  const mode = spec.access_mode || 'none';
+  const env = spec.env || {};
+  return `<div class="field wide"><label>Contrôle d'accès</label>
+      <input type="hidden" data-f="access_mode" value="${mode}">
+      <div class="seg" role="radiogroup">${ACCESS_MODES.map(([m, l]) =>
+        `<button type="button" class="seg-btn ${m === mode ? 'on' : ''}" data-act="access" data-mode="${m}">${l}</button>`).join('')}</div>
+      <span class="hint" id="access-hint">${{ none: 'Tout le monde peut se connecter.', whitelist: 'Seuls les joueurs de la liste peuvent se connecter.',
+        blacklist: 'Les joueurs de la liste sont bannis ; tous les autres peuvent se connecter.' }[mode]}</span></div>
+    <div class="access-pane fields" data-pane="whitelist" style="grid-column:1/-1" ${mode === 'whitelist' ? '' : 'hidden'}>
+      ${fieldHtml(WHITELIST_FIELD, env.WHITELIST)}${fieldHtml(ENFORCE_FIELD, env.ENFORCE_WHITELIST)}
+    </div>
+    <div class="access-pane fields" data-pane="blacklist" style="grid-column:1/-1" ${mode === 'blacklist' ? '' : 'hidden'}>
+      <div class="field wide"><label for="ls-BAN">Joueurs bannis</label>
+        ${isNew ? '<span class="hint">Disponible une fois le serveur créé et démarré.</span>' : `<div class="plist">
+          <div class="plist-add"><input class="plist-input" id="ls-BAN" placeholder="Pseudo du joueur à bannir" autocomplete="off" maxlength="36">
+            <button type="button" class="btn" data-act="ban-add">${ic('plus')} Bannir</button></div>
+          <ul class="plist-items" id="ban-items"><li class="plist-empty">Chargement…</li></ul></div>
+          <span class="hint">Appliqué immédiatement (le serveur doit être démarré), sans passer par « Appliquer ».</span>`}
+      </div>
+    </div>`;
+}
+
+async function loadBans() {
+  const ul = $('#ban-items');
+  if (!ul || !S.sel) return;
+  try {
+    const { players } = await api(`/servers/${encodeURIComponent(S.sel)}/banned`);
+    ul.innerHTML = plistItems(players, 'ban-del');
+  } catch (e) { ul.innerHTML = `<li class="plist-empty">${esc(e.message)}</li>`; }
 }
 
 const DEFAULT_SPEC = { name: '', image_tag: 'latest', memory: '2G', mem_limit: null, cpu_limit: null, hosts: '', host_port: null,
-  router_default: false, data_path: null, restart: 'unless-stopped', env: { TYPE: 'VANILLA', VERSION: 'LATEST' } };
+  access_mode: 'none', router_default: false, data_path: null, restart: 'unless-stopped', env: { TYPE: 'VANILLA', VERSION: 'LATEST' } };
 
 function serverForm(spec, isNew) {
   const env = spec.env || {};
@@ -167,14 +248,28 @@ function serverForm(spec, isNew) {
       ${inp('name', 'Nom', spec.name, `required ${isNew ? '' : 'disabled'} placeholder="survie" pattern="[a-z0-9][a-z0-9_-]*"`, isNew ? 'a-z, 0-9, - et _ (sert de nom au conteneur).' : '')}
       ${inp('image_tag', 'Tag de l\'image itzg/minecraft-server', spec.image_tag, 'required placeholder="latest"', 'Ex. latest, java21, java17, stable.')}
       <div class="field"><label>Redémarrage automatique</label><select data-f="restart">
-        ${['unless-stopped', 'always', 'on-failure', 'no'].map((r) => `<option ${r === spec.restart ? 'selected' : ''}>${r}</option>`).join('')}</select></div>
+        ${[['unless-stopped', 'Toujours (sauf si arrêté manuellement)'], ['always', 'Toujours'], ['on-failure', 'Seulement après un plantage'], ['no', 'Jamais']]
+          .map(([r, label]) => `<option value="${r}" ${r === spec.restart ? 'selected' : ''}>${label}</option>`).join('')}</select></div>
+      ${fieldHtml(TZ_FIELD, env.TZ)}
     </div></div>
 
-    <div class="form-section"><h3>Ressources</h3><div class="fields">
-      ${inp('memory', 'Mémoire JVM (MEMORY)', spec.memory, 'required placeholder="2G"', 'Tas Java alloué (-Xmx).')}
-      ${inp('mem_limit', 'Limite mémoire du conteneur', spec.mem_limit, 'placeholder="3G"', 'Vide = illimitée. Prévois ~1 Go de plus que la JVM.')}
-      ${inp('cpu_limit', 'Limite CPU (cœurs)', spec.cpu_limit, 'type="number" step="0.1" min="0.1" placeholder="2"', 'Vide = illimitée.')}
-    </div></div>
+    <div class="form-section"><h3>Ressources et performances</h3>
+      <div class="subhead">Mémoire</div>
+      <div class="fields">
+        ${inp('memory', 'Mémoire maximale de Java', spec.memory, 'required placeholder="2G"', 'Le réglage principal : ce que le serveur Minecraft peut utiliser au maximum (ex. 2G, 4G).')}
+        ${fieldHtml(INIT_FIELD, env.INIT_MEMORY)}
+        ${inp('mem_limit', 'Plafond du conteneur Docker', spec.mem_limit, 'placeholder="3G"', 'Optionnel. Docker coupe le serveur s\'il dépasse : prévois ~1 Go de plus que la mémoire maximale. Vide = pas de plafond.')}
+      </div>
+      <div class="subhead">Processeur</div>
+      <div class="fields">
+        ${inp('cpu_limit', 'Limite de cœurs', spec.cpu_limit, 'type="number" step="0.1" min="0.1" placeholder="2"', 'Optionnel. Nombre maximum de cœurs utilisables (ex. 2 ou 1.5). Vide = pas de limite.')}
+      </div>
+      <div class="subhead">Optimisation Java</div>
+      <div class="fields">
+        ${fieldHtml(AIKAR_FIELD, env.USE_AIKAR_FLAGS)}
+        ${fieldHtml(JVM_FIELD, env.JVM_OPTS)}
+      </div>
+    </div>
 
     <div class="form-section"><h3>Réseau</h3><div class="fields">
       ${inp('hosts', 'Hostname(s) mc-router', spec.hosts, 'placeholder="survie.exemple.com"', 'Les joueurs se connectent avec ce nom ; séparer par des virgules.')}
@@ -183,7 +278,7 @@ function serverForm(spec, isNew) {
       ${inp('data_path', 'Dossier de données (optionnel)', spec.data_path, `${isNew ? '' : 'disabled'} placeholder="/srv/minecraft/survie"`, 'Chemin sur l\'hôte ; vide = volume Docker nommé.')}
     </div></div>
 
-    ${SCHEMA.map((g) => `<div class="form-section"><h3>${g.title}</h3><div class="fields">${g.fields.map((f) => fieldHtml(f, env[f.k])).join('')}</div></div>`).join('')}
+    ${SCHEMA.map((g) => `<div class="form-section"><h3>${g.title}</h3><div class="fields">${g.fields.map((f) => fieldHtml(f, env[f.k])).join('')}${g.title === 'Joueurs' ? accessSection(spec, isNew) : ''}</div></div>`).join('')}
 
     <div class="form-section"><h3>Variables personnalisées</h3><div class="fields">
       <div class="field wide"><label>Une variable par ligne : NOM=valeur</label>
@@ -217,7 +312,7 @@ function readServerForm() {
     name: text('name'), image_tag: text('image_tag') || 'latest', memory: text('memory') || '2G',
     mem_limit: orNull('mem_limit'), cpu_limit: text('cpu_limit') ? Number(text('cpu_limit')) : null,
     hosts: text('hosts'), host_port: text('host_port') ? Number(text('host_port')) : null,
-    router_default: val('router_default').checked, data_path: orNull('data_path'), restart: val('restart').value, env,
+    access_mode: val('access_mode').value, router_default: val('router_default').checked, data_path: orNull('data_path'), restart: val('restart').value, env,
   };
 }
 
@@ -353,6 +448,7 @@ function mountServer() {
       <div class="cmd-out" id="cmd-out"></div>`;
   } else if (S.tab === 'settings') {
     $('#tabbody').innerHTML = serverForm(s.spec, false);
+    if (s.spec.access_mode === 'blacklist') loadBans();
   }
 }
 
@@ -611,6 +707,32 @@ async function watchUpdate() {
 }
 
 const ACTIONS = {
+  access: (btn) => {
+    const mode = btn.dataset.mode, form = btn.closest('form');
+    form.querySelector('[data-f="access_mode"]').value = mode;
+    form.querySelectorAll('.seg-btn').forEach((b) => b.classList.toggle('on', b === btn));
+    form.querySelectorAll('.access-pane').forEach((p) => { p.hidden = p.dataset.pane !== mode; });
+    $('#access-hint').textContent = { none: 'Tout le monde peut se connecter.', whitelist: 'Seuls les joueurs de la liste peuvent se connecter.',
+      blacklist: 'Les joueurs de la liste sont bannis ; tous les autres peuvent se connecter.' }[mode];
+    if (mode === 'blacklist') loadBans();
+  },
+  'ban-add': async () => {
+    const input = $('#ls-BAN'), names = input.value.split(/[\s,]+/).filter(Boolean);
+    try {
+      for (const player of names) await api(`/servers/${encodeURIComponent(S.sel)}/ban`, { method: 'POST', body: { player } });
+      input.value = '';
+      if (names.length) toast(names.length > 1 ? 'Joueurs bannis' : `${names[0]} banni`);
+    } catch (e) { toast(e.message, true); }
+    loadBans();
+  },
+  'ban-del': async (btn) => {
+    const player = btn.closest('li').dataset.name;
+    try { await api(`/servers/${encodeURIComponent(S.sel)}/pardon`, { method: 'POST', body: { player } }); toast(`${player} débanni`); }
+    catch (e) { toast(e.message, true); }
+    loadBans();
+  },
+  'list-add': (btn) => plistAdd(btn.closest('.plist')),
+  'list-del': (btn) => plistRemove(btn.closest('li')),
   profile: () => openProfile(),
   'close-modal': () => closeModal(),
   'save-account': async (btn) => {
@@ -688,13 +810,33 @@ const ACTIONS = {
   },
 };
 
-document.addEventListener('change', (e) => {
-  if (e.target.matches?.('select[data-env]')) e.target.classList.toggle('is-default', e.target.value === '');
+const closeDropdowns = (except = null) => document.querySelectorAll('.dd-list:not([hidden])').forEach((l) => { if (l !== except) l.hidden = true; });
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { closeDropdowns(); closeModal(); }
+  if (e.key === 'Enter' && e.target.classList?.contains('plist-input')) {
+    e.preventDefault();
+    if (e.target.id === 'ls-BAN') ACTIONS['ban-add'](); else plistAdd(e.target.closest('.plist'));
+  }
 });
 
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
-
 document.addEventListener('click', (e) => {
+  const ddBtn = e.target.closest('.dd-btn');
+  if (ddBtn) {
+    const list = ddBtn.nextElementSibling;
+    closeDropdowns(list);
+    list.hidden = !list.hidden;
+    return;
+  }
+  const ddItem = e.target.closest('.dd-list li');
+  if (ddItem) {
+    const dd = ddItem.closest('.dd');
+    dd.querySelector('input[type=hidden]').value = ddItem.dataset.v;
+    dd.querySelector('.dd-text').innerHTML = ddItem.innerHTML;
+    dd.querySelector('.dd-list').hidden = true;
+    return;
+  }
+  closeDropdowns();
   if (e.target.classList?.contains('modal-backdrop')) { closeModal(); return; }
   const nav = e.target.closest('[data-nav]');
   if (nav) {

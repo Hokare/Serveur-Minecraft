@@ -46,6 +46,19 @@ def test_validation_error_is_422(client):
     assert client.post("/api/servers", headers=w(), json={"name": "BAD NAME"}).status_code == 422
 
 
+def test_specific_post_routes_not_shadowed_by_generic_action(client, monkeypatch):
+    from app import main
+    calls = []
+    monkeypatch.setattr(main.manager, "command", lambda n, c: calls.append(("cmd", c)) or "ok")
+    monkeypatch.setattr(main.manager, "banned_players", lambda n: [])
+    monkeypatch.setattr(main.manager, "action", lambda n, a: calls.append(("action", a)) or {})
+    assert client.post("/api/servers/s/command", headers=w(), json={"command": "list"}).json() == {"output": "ok"}
+    assert client.post("/api/servers/s/ban", headers=w(), json={"player": "Troll"}).status_code == 200
+    assert client.post("/api/servers/s/pardon", headers=w(), json={"player": "Troll"}).status_code == 200
+    assert client.post("/api/servers/s/restart", headers=w()).status_code == 200
+    assert calls == [("cmd", "list"), ("cmd", "ban Troll"), ("cmd", "pardon Troll"), ("action", "restart")]
+
+
 def test_static_index_served(client):
     r = client.get("/", headers=basic())
     assert "MC Panel" in r.text and r.headers["cache-control"] == "no-cache"

@@ -27,6 +27,21 @@ def test_spec_rejects_invalid(bad):
         ServerSpec(**bad)
 
 
+def test_access_mode_controls_whitelist_env():
+    from app.dockerops import Manager
+    base = {"EULA": "TRUE", "WHITELIST": "Steve,Alex", "ENFORCE_WHITELIST": "TRUE"}
+    wl = Manager.build_env(ServerSpec(name="a", access_mode="whitelist", env=base))
+    assert wl["ENABLE_WHITELIST"] == "TRUE" and wl["WHITELIST"] == "Steve,Alex"
+    for mode in ("none", "blacklist"):
+        env = Manager.build_env(ServerSpec(name="a", access_mode=mode, env=base))
+        assert not {"WHITELIST", "ENABLE_WHITELIST", "ENFORCE_WHITELIST"} & env.keys()
+
+
+def test_legacy_spec_with_whitelist_stays_whitelisted():
+    assert ServerSpec(name="a", env={"WHITELIST": "Steve"}).access_mode == "whitelist"
+    assert ServerSpec(name="a", env={"EULA": "TRUE"}).access_mode == "none"
+
+
 def test_router_spec():
     assert RouterSpec().host_port == 25565
     with pytest.raises(ValidationError):
