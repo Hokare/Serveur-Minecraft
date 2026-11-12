@@ -9,6 +9,12 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const ICONS = {
   plus: '<path d="M12 5v14M5 12h14"/>',
   chevron: '<path d="M6 9l6 6 6-6"/>',
+  file: '<path d="M14 3.5H7.5a2 2 0 00-2 2v13a2 2 0 002 2h9a2 2 0 002-2V8z"/><path d="M14 3.5V8h4.5M9 13h6M9 16.5h4"/>',
+  folder: '<path d="M3.5 7.5a2 2 0 012-2h4l2 2.5h7a2 2 0 012 2v7.5a2 2 0 01-2 2h-13a2 2 0 01-2-2z"/>',
+  pencil: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
+  up: '<path d="M12 19V6M6.5 11.5L12 6l5.5 5.5"/>',
+  filenew: '<path d="M14 3.5H7.5a2 2 0 00-2 2v13a2 2 0 002 2h9a2 2 0 002-2V8z"/><path d="M14 3.5V8h4.5M12 11.5v6M9 14.5h6"/>',
+  foldernew: '<path d="M3.5 7.5a2 2 0 012-2h4l2 2.5h7a2 2 0 012 2v7.5a2 2 0 01-2 2h-13a2 2 0 01-2-2z"/><path d="M12 11v5M9.5 13.5h5"/>',
   search: '<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/>',
   home: '<path d="M3.5 11.5L12 4l8.5 7.5"/><path d="M5.5 10v9.5h13V10"/><path d="M10 19.5v-5h4v5"/>',
   server: '<rect x="3.5" y="4" width="17" height="6.5" rx="2"/><rect x="3.5" y="13.5" width="17" height="6.5" rx="2"/><path d="M7.5 7.25h.01M7.5 16.75h.01"/>',
@@ -365,6 +371,7 @@ function chart(points, series, { max = null, floor = 0 } = {}) {
 const NAV = [
   { id: 'home', icon: 'home', title: 'Accueil' },
   { id: 'server', icon: 'server', title: 'Serveurs' },
+  { id: 'fs', icon: 'file', title: 'Fichiers' },
   { id: 'router', icon: 'route', title: 'Routeur' },
   { id: 'docker', icon: 'box', title: 'Docker' },
 ];
@@ -385,9 +392,9 @@ function renderRail() {
 }
 
 function renderPanel() {
-  const titles = { home: 'Accueil', server: 'Serveurs', new: 'Nouveau serveur', router: 'Routeur', docker: 'Docker' };
+  const titles = { home: 'Accueil', server: 'Serveurs', fs: 'Fichiers', new: 'Nouveau serveur', router: 'Routeur', docker: 'Docker' };
   $('#panel-title').textContent = titles[S.view];
-  document.querySelector('.nav').classList.toggle('no-panel', S.view !== 'server');
+  document.querySelector('.nav').classList.toggle('no-panel', !['server', 'fs'].includes(S.view));
   const servers = (S.ov?.servers || []).filter((s) => s.name.includes(S.filter.toLowerCase()));
   const row = (s) => {
     const st = statusOf(s);
@@ -396,6 +403,14 @@ function renderPanel() {
       <span class="led ${st.key}"></span><span class="name">${esc(s.name)}</span>
       <span class="meta">${n != null ? `${n}/${s.stats.max_players ?? '?'}` : ''}</span></button>`;
   };
+  if (S.view === 'fs') {   // tous les serveurs, par ordre alphabétique
+    const sorted = [...servers].sort(byName);
+    $('#panel-list').innerHTML = `<div class="group-label">Serveurs (A → Z)</div>${sorted.length
+      ? sorted.map((s) => `<button class="item ${S.sel === s.name ? 'active' : ''}" data-nav="fs" data-name="${esc(s.name)}">
+          <span class="led ${statusOf(s).key}"></span><span class="name">${esc(s.name)}</span></button>`).join('')
+      : '<div class="empty">Aucun serveur</div>'}`;
+    return;
+  }
   const up = servers.filter(isUp), down = servers.filter((s) => !isUp(s));
   let html = `<div class="group-label">En ligne</div>${up.length ? up.map(row).join('') : '<div class="empty">Aucun serveur en ligne</div>'}`;
   if (down.length) html += `<div class="group-label">Arrêtés</div>${down.map(row).join('')}`;
@@ -418,6 +433,7 @@ function mountMain() {
   else if (S.view === 'server') mountServer();
   else if (S.view === 'router') mountRouter();
   else if (S.view === 'docker') mountDocker();
+  else if (S.view === 'fs') mountFs();
 }
 
 /* ---------------------------------------------------------------- Accueil */
@@ -505,29 +521,155 @@ async function backupAndWait(reason, onProgress) {
 }
 
 /* ---------------------------------------------------------------- Confirmation personnalisée */
-function askModal({ title, body, check = null, confirmLabel = 'Continuer', danger = false }) {
+function askModal({ title, body = '', input = null, check = null, confirmLabel = 'Continuer', danger = false }) {
   return new Promise((resolve) => {
     $('#modal').innerHTML = modalShell(`<div class="modal-head"><h2>${esc(title)}</h2></div>
       <div class="ask-body">${body}</div>
+      ${input ? `<div class="field" style="margin-top:12px"><label for="ask-input">${esc(input.label)}</label>
+        <input id="ask-input" value="${esc(input.value || '')}" placeholder="${esc(input.placeholder || '')}" autocomplete="off" maxlength="255"></div>` : ''}
       ${check ? `<label class="check" style="margin:16px 0 4px"><input type="checkbox" id="ask-check" ${check.checked ? 'checked' : ''}> ${esc(check.label)}</label>` : ''}
       <div class="ask-actions"><button class="btn" data-ask="no">Annuler</button>
         <button class="btn ${danger ? 'danger-fill' : 'primary'}" data-ask="yes">${esc(confirmLabel)}</button></div>`);
     const finish = (ok) => {
       const checked = $('#ask-check')?.checked ?? false;
+      const value = $('#ask-input')?.value ?? '';
       $('#modal').innerHTML = '';
       document.removeEventListener('click', onClick, true);
       document.removeEventListener('keydown', onKey, true);
-      resolve({ ok, checked });
+      resolve({ ok, checked, value });
     };
     const onClick = (e) => {
       const b = e.target.closest?.('[data-ask]');
       if (b) { e.stopPropagation(); finish(b.dataset.ask === 'yes'); }
       else if (e.target.classList?.contains('modal-backdrop')) { e.stopPropagation(); finish(false); }
     };
-    const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); finish(false); } };
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.stopPropagation(); finish(false); }
+      else if (e.key === 'Enter' && e.target.id === 'ask-input') { e.preventDefault(); e.stopPropagation(); finish(true); }
+    };
     document.addEventListener('click', onClick, true);
     document.addEventListener('keydown', onKey, true);
+    $('#ask-input')?.focus();
+    $('#ask-input')?.select();
   });
+}
+
+/* ---------------------------------------------------------------- Explorateur de fichiers */
+const byName = (a, b) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' });
+const fsApi = (kind, extra = '') => `/servers/${encodeURIComponent(S.sel)}/fs/${kind}?path=${encodeURIComponent(S.fsPath)}${extra}`;
+const fsJoin = (name) => (S.fsPath ? `${S.fsPath}/${name}` : name);
+const fsParent = () => S.fsPath.split('/').slice(0, -1).join('/');
+
+function mountFs() {
+  const servers = [...(S.ov?.servers || [])].sort(byName);
+  if (!S.sel || !server(S.sel)) { S.sel = servers[0]?.name || null; renderPanel(); }
+  if (!S.sel) {
+    $('#main').innerHTML = '<div class="page-head"><h2>Fichiers</h2></div><div class="card"><div class="empty">Aucun serveur pour l\'instant.</div></div>';
+    return;
+  }
+  if (S.fsFor !== S.sel) { S.fsFor = S.sel; S.fsPath = ''; S.fsFile = null; }
+  $('#main').innerHTML = `<div class="page-head"><h2>${esc(S.sel)}</h2><span class="grow"></span><div class="fs-tools" id="fs-tools"></div></div>
+    <div class="crumbs" id="fs-crumbs"></div><div id="fs-body"></div>`;
+  fsRender();
+}
+
+function fsRender() {
+  if (!$('#fs-body')) return;
+  const editing = !!S.fsFile;
+  $('#fs-tools').innerHTML = editing ? '' : `
+    <button class="btn" data-act="fs-new-file">${ic('filenew')} Nouveau fichier</button>
+    <button class="btn" data-act="fs-new-dir">${ic('foldernew')} Nouveau dossier</button>
+    <label class="btn">${ic('download')} Envoyer<input type="file" id="fs-upload" multiple hidden></label>
+    <button class="icon-btn" data-act="fs-refresh" title="Actualiser">${ic('refresh', 18)}</button>`;
+  let acc = '';
+  const crumbs = (S.fsPath ? S.fsPath.split('/') : []).map((p) => {
+    acc = acc ? `${acc}/${p}` : p;
+    return `<span class="crumb-sep">›</span><button class="crumb" data-act="fs-go" data-path="${esc(acc)}">${esc(p)}</button>`;
+  }).join('');
+  const fileCrumb = editing ? `<span class="crumb-sep">›</span><b>${esc(S.fsFile.name)}</b>` : '';
+  $('#fs-crumbs').innerHTML = `<button class="crumb" data-act="fs-go" data-path="">/data</button>${crumbs}${fileCrumb}`;
+  if (editing) fsEditor(); else loadFs();
+}
+
+async function loadFs() {
+  const body = $('#fs-body');
+  if (!body) return;
+  const token = `${S.sel}|${S.fsPath}`;
+  body.innerHTML = '<div class="card"><div class="empty">Chargement…</div></div>';
+  try {
+    const { entries } = await api(fsApi('list'));
+    if (token !== `${S.sel}|${S.fsPath}` || S.fsFile || !$('#fs-body')) return;
+    const dl = (n) => `/api/servers/${encodeURIComponent(S.sel)}/fs/download?path=${encodeURIComponent(fsJoin(n))}`;
+    body.innerHTML = `<div class="card fs-card"><table class="fs-table"><tbody>
+      ${S.fsPath ? `<tr class="click" data-act="fs-go" data-path="${esc(fsParent())}"><td colspan="3"><span class="fs-name">${ic('up', 18)} <span>..</span></span></td></tr>` : ''}
+      ${entries.map((e) => `<tr>
+        <td><button class="fs-name" data-act="fs-open" data-name="${esc(e.name)}" data-dir="${e.dir ? 1 : 0}">${ic(e.dir ? 'folder' : 'file', 18)} <span>${esc(e.name)}</span></button></td>
+        <td class="fs-size">${e.dir ? '' : fmtBytes(e.size)}</td>
+        <td class="fs-actions">${e.dir ? '' : `<a class="icon-btn" href="${dl(e.name)}" title="Télécharger" download>${ic('download', 18)}</a>`}
+          <button class="icon-btn" data-act="fs-rename" data-name="${esc(e.name)}" title="Renommer">${ic('pencil', 18)}</button>
+          <button class="icon-btn" data-act="fs-del" data-name="${esc(e.name)}" data-dir="${e.dir ? 1 : 0}" title="Supprimer">${ic('trash', 18)}</button></td></tr>`).join('')}
+      </tbody></table>${entries.length ? '' : '<div class="empty">Dossier vide.</div>'}</div>
+      <p class="hint" style="margin-top:12px">Glisse des fichiers ici pour les envoyer dans ce dossier. Certains fichiers sont réécrits par le serveur ou au redémarrage.</p>`;
+  } catch (e) { body.innerHTML = `<div class="card"><div class="empty">${esc(e.message)}</div></div>`; }
+}
+
+async function fsOpenFile(name) {
+  const path = fsJoin(name);
+  try {
+    const r = await api(`/servers/${encodeURIComponent(S.sel)}/fs/read?path=${encodeURIComponent(path)}`);
+    S.fsFile = { path, name, original: r.content };
+    fsRender();
+  } catch (e) { toast(e.message, true); }
+}
+
+function fsEditor() {
+  const f = S.fsFile, running = isUp(server(S.sel) || {});
+  const props = f.name === 'server.properties';
+  $('#fs-body').innerHTML = `<div class="card">
+    <div class="chart-head"><div class="hint mono">/data/${esc(f.path)}</div>
+      <div style="display:flex;gap:8px;align-items:center"><span class="hint" id="fs-dirty"></span>
+        <button class="btn" data-act="fs-close">Fermer</button>
+        <button class="btn primary" data-act="fs-save">${ic('save')} Enregistrer</button></div></div>
+    ${props ? '<div class="banner" style="margin:12px 0 0">Ce fichier est <b>régénéré au démarrage</b> à partir des paramètres du serveur : tes changements seront écrasés. Modifie plutôt l\'onglet Paramètres du serveur.</div>' : ''}
+    <textarea id="fs-editor" class="editor" spellcheck="false" wrap="off">${esc(f.original)}</textarea>
+    <p class="hint" style="margin:10px 0 0">Ctrl+S pour enregistrer. ${running ? 'Le serveur tourne : redémarre-le pour appliquer, et sache que le jeu peut réécrire certains fichiers.' : 'Les changements seront pris en compte au prochain démarrage.'}</p></div>`;
+  $('#fs-editor').addEventListener('input', fsMarkDirty);
+}
+
+const fsDirty = () => S.fsFile && $('#fs-editor') && $('#fs-editor').value !== S.fsFile.original;
+function fsMarkDirty() { const el = $('#fs-dirty'); if (el) el.textContent = fsDirty() ? '● modifié' : ''; }
+
+async function fsSave() {
+  if (!S.fsFile || !$('#fs-editor')) return false;
+  const content = $('#fs-editor').value;
+  try {
+    await api(`/servers/${encodeURIComponent(S.sel)}/fs/write`, { method: 'PUT', body: { path: S.fsFile.path, content } });
+    S.fsFile.original = content;
+    fsMarkDirty();
+    toast('Fichier enregistré');
+    return true;
+  } catch (e) { toast(e.message, true); return false; }
+}
+
+async function fsUpload(fileList) {
+  const files = [...fileList];
+  if (!files.length || !S.sel) return;
+  let ok = 0;
+  for (const [i, file] of files.entries()) {
+    toast(`Envoi de ${file.name} (${i + 1}/${files.length})…`);
+    try {
+      const res = await fetch(`/api${fsApi('upload', `&filename=${encodeURIComponent(file.name)}`)}`,
+        { method: 'PUT', headers: { 'X-Requested-With': 'mc-panel', 'Content-Type': 'application/octet-stream' }, body: file });
+      if (!res.ok) {
+        let msg = res.statusText;
+        try { const j = await res.json(); msg = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail); } catch { /* corps non JSON */ }
+        throw new Error(msg);
+      }
+      ok++;
+    } catch (e) { toast(`${file.name} : ${e.message}`, true); }
+  }
+  if (ok) toast(`${ok} fichier${ok > 1 ? 's' : ''} envoyé${ok > 1 ? 's' : ''}`);
+  if (!S.fsFile) loadFs();
 }
 
 /* Changements de type / version : peuvent rendre un monde existant illisible. */
@@ -805,6 +947,7 @@ async function tick() {
   try { S.ov = await api('/overview'); S.err = null; } catch (e) { S.err = e.message; }
   renderRail(); renderPanel();
   if (S.view === 'server' && S.ov && !server(S.sel)) { go('home'); return; }
+  if (S.view === 'fs' && S.ov && S.sel && !server(S.sel)) { go('fs'); return; }
   await updateLive();
 }
 
@@ -905,6 +1048,53 @@ async function watchUpdate() {
 }
 
 const ACTIONS = {
+  'fs-go': async (btn) => {
+    if (S.fsFile && fsDirty() && !(await askModal({ title: 'Modifications non enregistrées', body: '<p style="margin:0">Quitter ce fichier sans enregistrer ?</p>', confirmLabel: 'Quitter sans enregistrer', danger: true })).ok) return;
+    S.fsFile = null; S.fsPath = btn.dataset.path; fsRender();
+  },
+  'fs-open': (btn) => {
+    if (btn.dataset.dir === '1') { S.fsPath = fsJoin(btn.dataset.name); fsRender(); } else fsOpenFile(btn.dataset.name);
+  },
+  'fs-refresh': () => loadFs(),
+  'fs-close': async () => {
+    if (fsDirty() && !(await askModal({ title: 'Modifications non enregistrées', body: '<p style="margin:0">Fermer ce fichier sans enregistrer ?</p>', confirmLabel: 'Fermer sans enregistrer', danger: true })).ok) return;
+    S.fsFile = null; fsRender();
+  },
+  'fs-save': () => fsSave(),
+  'fs-new-file': async () => {
+    const { ok, value } = await askModal({ title: 'Nouveau fichier', confirmLabel: 'Créer', input: { label: `Nom du fichier dans /data/${S.fsPath}`, placeholder: 'exemple.yml' } });
+    const name = value.trim();
+    if (!ok || !name) return;
+    try { await api(`/servers/${encodeURIComponent(S.sel)}/fs/create`, { method: 'POST', body: { path: fsJoin(name), kind: 'file' } }); await fsOpenFile(name); }
+    catch (e) { toast(e.message, true); }
+  },
+  'fs-new-dir': async () => {
+    const { ok, value } = await askModal({ title: 'Nouveau dossier', confirmLabel: 'Créer', input: { label: `Nom du dossier dans /data/${S.fsPath}`, placeholder: 'mon-dossier' } });
+    const name = value.trim();
+    if (!ok || !name) return;
+    try { await api(`/servers/${encodeURIComponent(S.sel)}/fs/create`, { method: 'POST', body: { path: fsJoin(name), kind: 'dir' } }); toast('Dossier créé'); }
+    catch (e) { toast(e.message, true); }
+    loadFs();
+  },
+  'fs-rename': async (btn) => {
+    const old = btn.dataset.name;
+    const { ok, value } = await askModal({ title: 'Renommer', confirmLabel: 'Renommer', input: { label: 'Nouveau nom', value: old } });
+    const name = value.trim();
+    if (!ok || !name || name === old) return;
+    try { await api(`/servers/${encodeURIComponent(S.sel)}/fs/rename`, { method: 'POST', body: { path: fsJoin(old), new_name: name } }); toast('Renommé'); }
+    catch (e) { toast(e.message, true); }
+    loadFs();
+  },
+  'fs-del': async (btn) => {
+    const name = btn.dataset.name, isDir = btn.dataset.dir === '1';
+    const { ok } = await askModal({ title: isDir ? 'Supprimer le dossier' : 'Supprimer le fichier', confirmLabel: 'Supprimer', danger: true,
+      body: `<p style="margin:0 0 8px">Supprimer définitivement ${isDir ? 'ce dossier <b>et tout son contenu</b>' : 'ce fichier'} ? Cette action est irréversible.</p>
+        <p class="hint mono" style="margin:0">/data/${esc(fsJoin(name))}</p>` });
+    if (!ok) return;
+    try { await api(`/servers/${encodeURIComponent(S.sel)}/fs?path=${encodeURIComponent(fsJoin(name))}`, { method: 'DELETE' }); toast('Supprimé'); }
+    catch (e) { toast(e.message, true); }
+    loadFs();
+  },
   'backup-create': async () => {
     try { await api(`/servers/${encodeURIComponent(S.sel)}/backups`, { method: 'POST' }); toast('Sauvegarde lancée'); }
     catch (e) { toast(e.message, true); }
@@ -1068,18 +1258,29 @@ const ACTIONS = {
 
 document.addEventListener('change', (e) => {
   if (e.target.id === 'file-input') { uploadFiles(e.target.files); e.target.value = ''; }
+  if (e.target.id === 'fs-upload') { fsUpload(e.target.files); e.target.value = ''; }
 });
 ['dragover', 'dragleave', 'drop'].forEach((type) => document.addEventListener(type, (e) => {
-  const zone = e.target.closest?.('#dropzone');
-  if (!zone) return;
+  const zone = e.target.closest?.('#dropzone, #fs-body');
+  if (!zone || (zone.id === 'fs-body' && S.fsFile)) return;     // pas d'envoi par glisser pendant l'édition
   e.preventDefault();
   zone.classList.toggle('over', type === 'dragover');
-  if (type === 'drop') uploadFiles(e.dataTransfer.files);
+  if (type === 'drop') (zone.id === 'fs-body' ? fsUpload : uploadFiles)(e.dataTransfer.files);
 }));
 
 const closeDropdowns = (except = null) => document.querySelectorAll('.dd-list:not([hidden])').forEach((l) => { if (l !== except) l.hidden = true; });
 
 document.addEventListener('keydown', (e) => {
+  if (e.target.id === 'fs-editor') {   // Ctrl+S enregistre ; Tab insère deux espaces (utile en YAML)
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); fsSave(); return; }
+    if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
+      e.preventDefault();
+      const t = e.target, a = t.selectionStart;
+      t.setRangeText('  ', a, t.selectionEnd, 'end');
+      fsMarkDirty();
+      return;
+    }
+  }
   if (e.key === 'Escape') { closeDropdowns(); closeModal(); }
   if (e.key === 'Enter' && e.target.classList?.contains('plist-input')) {
     e.preventDefault();

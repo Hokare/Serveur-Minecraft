@@ -8,14 +8,16 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import system
 from .auth import AuthStore
 from .backups import Backups
+from .files import FileManager
 from .dockerops import ROUTER_IMAGE, SERVER_IMAGE, Manager, PanelError
-from .models import AccountUpdate, CommandBody, PlayerBody, RouterSpec, ServerSpec
+from .models import (AccountUpdate, CommandBody, FileCreate, FileRename, FileWrite, PlayerBody, RouterSpec,
+                     ServerSpec)
 from .monitor import ROUTER_KEY, Monitor, host_stats
 
 log = logging.getLogger("mc-panel")
@@ -30,6 +32,7 @@ auth = AuthStore(
 manager = Manager()
 monitor = Monitor(manager)
 backups = Backups(manager)
+fsm = FileManager(manager)
 
 
 @asynccontextmanager
@@ -116,6 +119,60 @@ def server_logs(name: str, tail: int = 300):
 @app.post("/api/servers/{name}/command")
 def server_command(name: str, body: CommandBody):
     return {"output": manager.command(name, body.command)}
+
+
+@app.get("/api/servers/{name}/fs/list")
+def fs_list(name: str, path: str = ""):
+    return {"path": fsm.clean(path), "entries": fsm.list(name, path)}
+
+
+@app.get("/api/servers/{name}/fs/read")
+def fs_read(name: str, path: str):
+    return fsm.read(name, path)
+
+
+@app.put("/api/servers/{name}/fs/write")
+def fs_write(name: str, body: FileWrite):
+    fsm.write(name, body.path, body.content)
+    return {"ok": True}
+
+
+@app.post("/api/servers/{name}/fs/create")
+def fs_create(name: str, body: FileCreate):
+    fsm.create(name, body.path, body.kind)
+    return {"ok": True}
+
+
+@app.post("/api/servers/{name}/fs/rename")
+def fs_rename(name: str, body: FileRename):
+    fsm.rename(name, body.path, body.new_name)
+    return {"ok": True}
+
+
+@app.delete("/api/servers/{name}/fs")
+def fs_delete(name: str, path: str):
+    fsm.delete(name, path)
+    return {"ok": True}
+
+
+@app.put("/api/servers/{name}/fs/upload")
+async def fs_upload(name: str, filename: str, request: Request, path: str = ""):
+    if int(request.headers.get("content-length") or 0) > MAX_UPLOAD:
+        raise PanelError(413, f"Fichier trop gros (limite {MAX_UPLOAD // 1024 // 1024} Mo).")
+    data = bytearray()
+    async for chunk in request.stream():
+        data.extend(chunk)
+        if len(data) > MAX_UPLOAD:
+            raise PanelError(413, f"Fichier trop gros (limite {MAX_UPLOAD // 1024 // 1024} Mo).")
+    await run_in_threadpool(fsm.upload, name, path, filename, bytes(data))
+    return {"ok": True}
+
+
+@app.get("/api/servers/{name}/fs/download")
+def fs_download(name: str, path: str):
+    data, filename = fsm.download(name, path)
+    return Response(data, media_type="application/octet-stream",
+                    headers={"Content-Disposition": f'attachment; filename="{filename.replace(chr(34), "")}"'})
 
 
 @app.get("/api/servers/{name}/backups")

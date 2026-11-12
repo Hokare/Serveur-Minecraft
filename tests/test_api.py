@@ -87,6 +87,29 @@ def test_backup_routes_not_shadowed_and_download(client, monkeypatch, tmp_path):
     assert client.get("/api/servers/survie/backups/x.tar.gz").status_code == 401
 
 
+def test_fs_routes(client, monkeypatch):
+    from app import main
+    seen = []
+    monkeypatch.setattr(main.fsm, "list", lambda n, p: seen.append(("list", n, p)) or [{"name": "a", "dir": True, "size": 0}])
+    monkeypatch.setattr(main.fsm, "create", lambda n, p, k: seen.append(("create", p, k)))
+    monkeypatch.setattr(main.fsm, "rename", lambda n, p, new: seen.append(("rename", p, new)))
+    monkeypatch.setattr(main.fsm, "delete", lambda n, p: seen.append(("delete", p)))
+    monkeypatch.setattr(main.fsm, "upload", lambda n, d, f, data: seen.append(("upload", d, f, len(data))))
+    monkeypatch.setattr(main.fsm, "download", lambda n, p: (b"contenu", "a.txt"))
+    assert client.get("/api/servers/survie/fs/list?path=plugins/", headers=basic()).json() == {
+        "path": "plugins", "entries": [{"name": "a", "dir": True, "size": 0}]}
+    assert client.post("/api/servers/survie/fs/create", headers=w(), json={"path": "x.txt", "kind": "file"}).status_code == 200
+    assert client.post("/api/servers/survie/fs/create", headers=w(), json={"path": "x", "kind": "socket"}).status_code == 422
+    assert client.post("/api/servers/survie/fs/rename", headers=w(), json={"path": "x.txt", "new_name": "y.txt"}).status_code == 200
+    assert client.delete("/api/servers/survie/fs?path=x.txt", headers=w()).status_code == 200
+    assert client.put("/api/servers/survie/fs/upload?path=cfg&filename=a.json", headers=w(), content=b"{}").status_code == 200
+    r = client.get("/api/servers/survie/fs/download?path=a.txt", headers=basic())
+    assert r.content == b"contenu" and "a.txt" in r.headers["content-disposition"]
+    assert seen == [("list", "survie", "plugins/"), ("create", "x.txt", "file"), ("rename", "x.txt", "y.txt"),
+                    ("delete", "x.txt"), ("upload", "cfg", "a.json", 2)]
+    assert client.get("/api/servers/survie/fs/list").status_code == 401
+
+
 def test_static_index_served(client):
     r = client.get("/", headers=basic())
     assert "MC Panel" in r.text and r.headers["cache-control"] == "no-cache"

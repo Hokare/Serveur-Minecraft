@@ -36,6 +36,14 @@ mets `PANEL_PASSWORD=...` (et éventuellement `PANEL_USER=...`) dans un fichier 
   avant d'appliquer (baisser la version est signalé comme risque élevé).
 - Les sauvegardes sont sur le **même disque** que les serveurs : télécharge les importantes.
 
+## Explorateur de fichiers
+
+Icône **Fichiers** du rail : la liste des serveurs (ordre alphabétique) s'affiche sur le côté ; un clic ouvre le dossier `/data`
+du serveur. Tu peux naviguer, ouvrir et modifier les fichiers texte (1 Mo max, Ctrl+S pour enregistrer), créer fichiers et dossiers,
+envoyer des fichiers (bouton ou glisser-déposer), télécharger, renommer et supprimer. Ça marche serveur allumé ou arrêté.
+Attention : `server.properties` est régénéré au démarrage depuis les paramètres du serveur, et un fichier supprimé ne se récupère pas
+(fais une sauvegarde avant les gros changements).
+
 ## Mods et plugins
 
 Onglet **Mods / Plugins** : envoi de fichiers `.jar` (128 Mo max, variable `PANEL_MAX_UPLOAD_MB`), liste et suppression.

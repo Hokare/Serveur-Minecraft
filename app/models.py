@@ -130,5 +130,20 @@ class PlayerBody(BaseModel):
     player: str = Field(pattern=r"^[A-Za-z0-9_-]{1,36}$")
 
 
+class FileWrite(BaseModel):
+    path: str = Field(min_length=1, max_length=1024)
+    content: str = Field(max_length=2_000_000)
+
+
+class FileCreate(BaseModel):
+    path: str = Field(min_length=1, max_length=1024)
+    kind: Literal["file", "dir"]
+
+
+class FileRename(BaseModel):
+    path: str = Field(min_length=1, max_length=1024)
+    new_name: str = Field(min_length=1, max_length=255)
+
+
 class CommandBody(BaseModel):
     command: str = Field(min_length=1, max_length=500)
