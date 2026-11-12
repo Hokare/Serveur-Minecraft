@@ -586,7 +586,7 @@ async function watchUpdate() {
   const setBox = (html) => { const el = $('#upd-state'); if (el) el.innerHTML = html; };
   const btn = $('[data-act="do-update"]'); if (btn) btn.disabled = true;
   setBox('<div class="notice"><span class="spin"></span> Reconstruction du panel en cours (quelques minutes). Ne ferme pas cette page.</div>');
-  let sawDown = false;
+  let sawDown = false, sawRunning = false;
   const deadline = Date.now() + 20 * 60 * 1000;
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 3000));
@@ -598,7 +598,9 @@ async function watchUpdate() {
         if (btn) btn.disabled = false;
         return;
       }
-      if (st.state === 'done' || (st.state === 'idle' && sawDown)) { location.reload(); return; }
+      if (st.state === 'running') sawRunning = true;
+      // « idle » après avoir vu l'updater tourner = le nouveau panel a démarré et l'a nettoyé.
+      if (st.state === 'done' || (st.state === 'idle' && (sawDown || sawRunning))) { location.reload(); return; }
     } catch {
       sawDown = true;
       setBox('<div class="notice"><span class="spin"></span> Redémarrage du panel…</div>');
