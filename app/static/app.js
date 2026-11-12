@@ -579,7 +579,7 @@ function fsRender() {
   $('#fs-tools').innerHTML = editing ? '' : `
     <button class="btn" data-act="fs-new-file">${ic('filenew')} Nouveau fichier</button>
     <button class="btn" data-act="fs-new-dir">${ic('foldernew')} Nouveau dossier</button>
-    <label class="btn">${ic('download')} Envoyer<input type="file" id="fs-upload" multiple hidden></label>
+    <label class="btn">${ic('download')} Importer<input type="file" id="fs-upload" multiple hidden></label>
     <button class="icon-btn" data-act="fs-refresh" title="Actualiser">${ic('refresh', 18)}</button>`;
   let acc = '';
   const crumbs = (S.fsPath ? S.fsPath.split('/') : []).map((p) => {
@@ -609,7 +609,7 @@ async function loadFs() {
           <button class="icon-btn" data-act="fs-rename" data-name="${esc(e.name)}" title="Renommer">${ic('pencil', 18)}</button>
           <button class="icon-btn" data-act="fs-del" data-name="${esc(e.name)}" data-dir="${e.dir ? 1 : 0}" title="Supprimer">${ic('trash', 18)}</button></td></tr>`).join('')}
       </tbody></table>${entries.length ? '' : '<div class="empty">Dossier vide.</div>'}</div>
-      <p class="hint" style="margin-top:12px">Glisse des fichiers ici pour les envoyer dans ce dossier. Certains fichiers sont réécrits par le serveur ou au redémarrage.</p>`;
+      <p class="hint" style="margin-top:12px">Glisse des fichiers ici pour les importer dans ce dossier. Certains fichiers sont réécrits par le serveur ou au redémarrage.</p>`;
   } catch (e) { body.innerHTML = `<div class="card"><div class="empty">${esc(e.message)}</div></div>`; }
 }
 
@@ -656,7 +656,7 @@ async function fsUpload(fileList) {
   if (!files.length || !S.sel) return;
   let ok = 0;
   for (const [i, file] of files.entries()) {
-    toast(`Envoi de ${file.name} (${i + 1}/${files.length})…`);
+    toast(`Import de ${file.name} (${i + 1}/${files.length})…`);
     try {
       const res = await fetch(`/api${fsApi('upload', `&filename=${encodeURIComponent(file.name)}`)}`,
         { method: 'PUT', headers: { 'X-Requested-With': 'mc-panel', 'Content-Type': 'application/octet-stream' }, body: file });
@@ -668,7 +668,7 @@ async function fsUpload(fileList) {
       ok++;
     } catch (e) { toast(`${file.name} : ${e.message}`, true); }
   }
-  if (ok) toast(`${ok} fichier${ok > 1 ? 's' : ''} envoyé${ok > 1 ? 's' : ''}`);
+  if (ok) toast(`${ok} fichier${ok > 1 ? 's' : ''} importé${ok > 1 ? 's' : ''}`);
   if (!S.fsFile) loadFs();
 }
 
