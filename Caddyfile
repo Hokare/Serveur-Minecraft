@@ -1,6 +1,9 @@
 {
 	# Certificats émis par l'autorité locale de Caddy (aucun nom de domaine public requis).
 	local_certs
+	# Quand on ouvre le panel par son adresse IP, le navigateur n'envoie pas de nom de site (SNI) : sans cette ligne,
+	# Caddy ne sait pas quel certificat présenter (dans Docker, il ne voit pas l'IP de la machine) et la connexion échoue.
+	default_sni {$PANEL_HOSTNAME:panel.local}
 	# Pas de redirection depuis le port 80 : le panel n'est servi qu'en HTTPS.
 	auto_https disable_redirects
 }
