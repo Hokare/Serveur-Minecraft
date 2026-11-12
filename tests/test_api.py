@@ -6,25 +6,31 @@ from fastapi.testclient import TestClient
 
 
 @pytest.fixture()
-def client(monkeypatch):
-    monkeypatch.setenv("PANEL_PASSWORD", "s3cret")
+def client(monkeypatch, tmp_path):
+    monkeypatch.setenv("PANEL_PASSWORD", "s3cretpass")
     monkeypatch.setenv("PANEL_USER", "admin")
+    monkeypatch.setenv("PANEL_DATA_DIR", str(tmp_path))
     from app import main
     importlib.reload(main)
     # pas de Docker dans les tests : le panel doit répondre proprement
     monkeypatch.setattr(main.manager, "available", lambda: False)
+    monkeypatch.setattr(main.manager, "cleanup_updater", lambda: None)
     with TestClient(main.app) as c:
         yield c
-    importlib.reload(main)
 
 
-def basic(user="admin", pwd="s3cret"):
+def basic(user="admin", pwd="s3cretpass"):
     return {"Authorization": "Basic " + base64.b64encode(f"{user}:{pwd}".encode()).decode()}
+
+
+def w(headers=None):
+    return {**(headers or basic()), "X-Requested-With": "mc-panel"}
 
 
 def test_requires_auth(client):
     assert client.get("/api/overview").status_code == 401
     assert client.get("/api/overview", headers=basic(pwd="nope")).status_code == 401
+    assert client.get("/api/overview", headers=basic(user="autre")).status_code == 401
 
 
 def test_overview_without_docker(client):
@@ -33,14 +39,52 @@ def test_overview_without_docker(client):
 
 
 def test_csrf_header_required_for_writes(client):
-    r = client.post("/api/servers/x/start", headers=basic())
-    assert r.status_code == 403
+    assert client.post("/api/servers/x/start", headers=basic()).status_code == 403
 
 
 def test_validation_error_is_422(client):
-    r = client.post("/api/servers", headers={**basic(), "X-Requested-With": "mc-panel"}, json={"name": "BAD NAME"})
-    assert r.status_code == 422
+    assert client.post("/api/servers", headers=w(), json={"name": "BAD NAME"}).status_code == 422
 
 
 def test_static_index_served(client):
-    assert "MC Panel" in client.get("/", headers=basic()).text
+    r = client.get("/", headers=basic())
+    assert "MC Panel" in r.text and r.headers["cache-control"] == "no-cache"
+
+
+def test_change_password_and_username(client):
+    r = client.post("/api/account", headers=w(), json={
+        "current_password": "s3cretpass", "new_username": "martin", "new_password": "nouveau-mdp-123"})
+    assert r.status_code == 200 and r.json()["username"] == "martin"
+    assert client.get("/api/account", headers=basic()).status_code == 401           # ancien identifiant refusé
+    assert client.get("/api/account", headers=basic("martin", "nouveau-mdp-123")).json() == {"username": "martin"}
+
+
+def test_account_update_rejects_bad_input(client):
+    base = {"current_password": "s3cretpass"}
+    assert client.post("/api/account", headers=w(), json={**base, "current_password": "faux", "new_password": "longenough1"}).status_code == 400
+    assert client.post("/api/account", headers=w(), json={**base, "new_password": "court"}).status_code == 400
+    assert client.post("/api/account", headers=w(), json={**base, "new_username": "a b"}).status_code == 400
+    assert client.post("/api/account", headers=w(), json=base).status_code == 400   # rien à modifier
+    assert client.get("/api/account", headers=basic()).status_code == 200          # inchangé
+
+
+def test_update_unavailable_without_github_or_compose(client, monkeypatch):
+    from app import main, system
+    monkeypatch.setattr(system, "latest_commit", lambda force=False: None)
+    assert client.post("/api/system/update", headers=w()).status_code == 502
+    assert main.system.info(main.manager)["supported"] is False
+
+
+def test_password_persisted_and_env_ignored_afterwards(monkeypatch, tmp_path):
+    from app.auth import AuthStore
+    a = AuthStore(tmp_path, "admin", "premier-mdp")
+    a.update_credentials("premier-mdp", new_password="second-mdp-ok")
+    b = AuthStore(tmp_path, "admin", "premier-mdp")          # redémarrage avec le même PANEL_PASSWORD
+    assert b.verify("admin", "second-mdp-ok") and not b.verify("admin", "premier-mdp")
+
+
+def test_random_password_generated_when_none_given(tmp_path, caplog):
+    from app.auth import AuthStore
+    store = AuthStore(tmp_path, "admin", "")
+    assert (tmp_path / "auth.json").exists()
+    assert "Mot de passe initial généré" in caplog.text and not store.verify("admin", "")

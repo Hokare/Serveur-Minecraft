@@ -1,19 +1,36 @@
+name: mc-panel
+
 services:
   panel:
-    build: .
+    # Le panel se construit depuis GitHub : c'est ce qui permet la mise à jour en un clic.
+    # Pour construire depuis ce dossier à la place : PANEL_BUILD_CONTEXT=. dans .env
+    build:
+      context: ${PANEL_BUILD_CONTEXT:-https://github.com/${PANEL_REPO:-Hokare/Serveur-Minecraft}.git#${PANEL_REF:-${PANEL_TRACK:-main}}}
+      args:
+        APP_SHA: ${APP_SHA:-}
+    image: mc-panel:latest
     container_name: mc-panel
     restart: unless-stopped
     environment:
       PANEL_USER: ${PANEL_USER:-admin}
-      PANEL_PASSWORD: ${PANEL_PASSWORD:?définis PANEL_PASSWORD dans .env}
+      # Mot de passe initial (facultatif). Sans lui, un mot de passe aléatoire est généré
+      # et affiché dans `docker logs mc-panel`. Ensuite il se change depuis l'interface.
+      PANEL_PASSWORD: ${PANEL_PASSWORD:-}
+      PANEL_REPO: ${PANEL_REPO:-Hokare/Serveur-Minecraft}
+      PANEL_TRACK: ${PANEL_TRACK:-main}
     ports:
       # Local uniquement. Pour l'exposer, place-le derrière un reverse proxy HTTPS.
       - "127.0.0.1:8080:8080"
     volumes:
       # Accès complet à Docker = équivalent root sur l'hôte : garde le mot de passe fort.
       - /var/run/docker.sock:/var/run/docker.sock
+      - mc-panel-data:/data        # identifiants du panel
+      - .:/project:ro              # permet à l'updater de retrouver ce docker-compose.yml
     networks:
       - mc-net   # permet au panel de « pinger » les serveurs (joueurs, latence)
+
+volumes:
+  mc-panel-data:
 
 networks:
   mc-net:

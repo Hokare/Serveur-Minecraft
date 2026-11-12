@@ -123,7 +123,20 @@ const SCHEMA = [
     bool('USE_AIKAR_FLAGS', 'Flags Aikar (optimisation GC)'),
   ] },
 ];
-const KNOWN_ENV = new Set(['EULA', 'MEMORY', ...SCHEMA.flatMap((g) => g.fields.map((f) => f.k))]);
+// Valeurs appliquées par itzg/minecraft-server quand la variable n'est pas définie.
+const DEFAULTS = {
+  TYPE: 'VANILLA', MODE: 'survival', DIFFICULTY: 'easy',
+  HARDCORE: 'FALSE', PVP: 'TRUE', ONLINE_MODE: 'TRUE', ALLOW_NETHER: 'TRUE', ALLOW_FLIGHT: 'FALSE',
+  ENABLE_COMMAND_BLOCK: 'FALSE', FORCE_GAMEMODE: 'FALSE', ENABLE_WHITELIST: 'FALSE', ENFORCE_WHITELIST: 'FALSE',
+  USE_AIKAR_FLAGS: 'FALSE',
+};
+const defaultLabel = (f) => {
+  const d = DEFAULTS[f.k];
+  if (!d) return '(défaut)';
+  return `${f.t === 'bool' ? (d === 'TRUE' ? 'Oui' : 'Non') : d} (défaut)`;
+};
+
+const KNOWN_ENV =new Set(['EULA', 'MEMORY', ...SCHEMA.flatMap((g) => g.fields.map((f) => f.k))]);
 
 function fieldHtml(f, val) {
   const v = val ?? '';
@@ -133,7 +146,7 @@ function fieldHtml(f, val) {
     const opts = f.t === 'bool' ? [['TRUE', 'Oui'], ['FALSE', 'Non']] : f.opts.map((o) => [o, o]);
     const cur = f.t === 'bool' ? String(v).toUpperCase() : v;
     if (cur && !opts.some(([o]) => o === cur)) opts.push([cur, cur]);
-    input = `<select ${common}><option value="">(défaut)</option>${opts.map(([o, l]) => `<option value="${esc(o)}" ${o === cur ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
+    input = `<select ${common} class="${cur ? '' : 'is-default'}"><option value="">${esc(defaultLabel(f))}</option>${opts.map(([o, l]) => `<option value="${esc(o)}" ${o === cur ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
   } else {
     input = `<input ${common} type="${f.t === 'number' ? 'number' : 'text'}" value="${esc(v)}" placeholder="${esc(f.ph || '')}">`;
   }
@@ -248,7 +261,7 @@ function renderRail() {
     ${NAV.map((n) => `<button class="rail-btn ${S.view === n.id || (n.id === 'server' && S.view === 'new') ? 'active' : ''}" data-nav="${n.id}" title="${n.title}">
       ${ic(n.icon)}${alerts[n.id] ? '<span class="dot"></span>' : ''}</button>`).join('')}
     <span class="rail-spacer"></span>
-    <div class="avatar ${S.ov ? (up ? 'up' : 'down') : ''}" title="${up ? 'Docker connecté' : 'Docker injoignable'}">MC</div>`;
+    <button class="avatar ${S.ov ? (up ? 'up' : 'down') : ''}" data-act="profile" title="Profil — ${up ? 'Docker connecté' : 'Docker injoignable'}">MC</button>`;
 }
 
 function renderPanel() {
@@ -515,7 +528,116 @@ async function run(label, fn) {
   await tick();
 }
 
+/* ======================================================================
+   Profil : compte et mise à jour du logiciel
+   ====================================================================== */
+const modal = { user: '', updating: false };
+
+function closeModal() {
+  if (modal.updating) return;
+  $('#modal').innerHTML = '';
+}
+
+const modalShell = (inner) => `<div class="modal-backdrop"><div class="modal" role="dialog" aria-modal="true">${inner}</div></div>`;
+
+function profileHtml(acc, sys) {
+  const latest = sys?.latest;
+  let badge = '<span class="pill">Version inconnue</span>';
+  if (sys?.up_to_date === true) badge = '<span class="pill"><span class="led running"></span>À jour</span>';
+  else if (sys?.up_to_date === false) badge = '<span class="pill"><span class="led starting"></span>Mise à jour disponible</span>';
+  const date = latest ? new Date(latest.date).toLocaleString('fr-FR', { dateStyle: 'medium', timeStyle: 'short' }) : '';
+  const blocked = !sys?.supported || !latest;
+  return modalShell(`
+    <div class="modal-head"><h2>Profil</h2><button class="btn" data-act="close-modal">Fermer</button></div>
+
+    <div class="form-section"><h3>Compte</h3>
+      <div class="fields" style="grid-template-columns:1fr">
+        <div class="field"><label for="acc-user">Nom d'utilisateur</label><input id="acc-user" value="${esc(acc.username)}" autocomplete="username"></div>
+        <div class="field"><label for="acc-cur">Mot de passe actuel <span class="req">*</span></label><input id="acc-cur" type="password" autocomplete="current-password"></div>
+        <div class="field"><label for="acc-new">Nouveau mot de passe</label><input id="acc-new" type="password" autocomplete="new-password"><span class="hint">8 caractères minimum. Laisse vide pour ne pas le changer.</span></div>
+        <div class="field"><label for="acc-new2">Confirmer le nouveau mot de passe</label><input id="acc-new2" type="password" autocomplete="new-password"></div>
+      </div>
+      <div style="margin-top:14px"><button class="btn primary" data-act="save-account">${ic('save')} Enregistrer</button>
+        <span class="hint" style="margin-left:10px">Tu devras te reconnecter ensuite.</span></div>
+    </div>
+
+    <div class="form-section"><h3>Logiciel</h3>
+      <div class="kv"><span>Version installée</span><b class="mono">${esc(sys?.current || 'inconnue')}</b></div>
+      <div class="kv"><span>Dernière version</span><b class="mono">${esc(latest?.short || 'GitHub injoignable')}</b></div>
+      ${latest ? `<div class="hint" style="margin:2px 0 10px">${esc(latest.message)} · ${esc(date)}</div>` : ''}
+      <div style="margin:10px 0">${badge}</div>
+      <button class="btn primary" data-act="do-update" ${blocked ? 'disabled' : ''}>${ic('download')} Mettre à jour</button>
+      <div id="upd-state" style="margin-top:12px"></div>
+      <p class="hint" style="margin-top:10px">${!sys ? 'Impossible de lire les informations de version.'
+        : !sys.supported ? 'Mise à jour indisponible : lance le panel avec le docker-compose.yml fourni (volume .:/project).'
+        : 'Reconstruit le panel depuis GitHub. Tes serveurs Minecraft ne sont pas interrompus.'}</p>
+    </div>`);
+}
+
+async function openProfile() {
+  $('#modal').innerHTML = modalShell('<div class="empty">Chargement…</div>');
+  let acc;
+  try { acc = await api('/account'); } catch (e) { toast(e.message, true); closeModal(); return; }
+  modal.user = acc.username;
+  let sys = null;
+  try { sys = await api('/system'); } catch { /* version indisponible */ }
+  $('#modal').innerHTML = profileHtml(acc, sys);
+  if (sys?.update?.state === 'running') watchUpdate();
+}
+
+async function watchUpdate() {
+  modal.updating = true;
+  const setBox = (html) => { const el = $('#upd-state'); if (el) el.innerHTML = html; };
+  const btn = $('[data-act="do-update"]'); if (btn) btn.disabled = true;
+  setBox('<div class="notice"><span class="spin"></span> Reconstruction du panel en cours (quelques minutes). Ne ferme pas cette page.</div>');
+  let sawDown = false;
+  const deadline = Date.now() + 20 * 60 * 1000;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 3000));
+    try {
+      const st = await api('/system/update');
+      if (st.state === 'failed') {
+        modal.updating = false;
+        setBox(`<div class="banner">La mise à jour a échoué (le panel actuel reste en place).</div><pre class="console" style="height:170px">${esc(st.logs || '')}</pre>`);
+        if (btn) btn.disabled = false;
+        return;
+      }
+      if (st.state === 'done' || (st.state === 'idle' && sawDown)) { location.reload(); return; }
+    } catch {
+      sawDown = true;
+      setBox('<div class="notice"><span class="spin"></span> Redémarrage du panel…</div>');
+    }
+  }
+  modal.updating = false;
+  setBox('<div class="banner">Délai dépassé. Vérifie <code>docker logs mc-panel-updater</code> sur le serveur.</div>');
+}
+
 const ACTIONS = {
+  profile: () => openProfile(),
+  'close-modal': () => closeModal(),
+  'save-account': async (btn) => {
+    const cur = $('#acc-cur').value, user = $('#acc-user').value.trim();
+    const np = $('#acc-new').value, np2 = $('#acc-new2').value;
+    if (!cur) { toast('Entre ton mot de passe actuel.', true); return; }
+    if (np !== np2) { toast('Les deux nouveaux mots de passe sont différents.', true); return; }
+    const body = { current_password: cur, new_username: user && user !== modal.user ? user : null, new_password: np || null };
+    if (!body.new_username && !body.new_password) { toast('Rien à modifier.', true); return; }
+    btn.disabled = true;
+    try {
+      await api('/account', { method: 'POST', body });
+      toast('Identifiants modifiés — reconnexion…');
+      setTimeout(() => location.reload(), 1200);
+    } catch (e) { toast(e.message, true); btn.disabled = false; }
+  },
+  'do-update': async (btn) => {
+    if (!confirm('Mettre à jour le panel ?\n\nIl sera reconstruit depuis GitHub puis redémarré (quelques secondes d\'indisponibilité). Tes serveurs Minecraft ne sont pas touchés.')) return;
+    btn.disabled = true;
+    try {
+      const r = await api('/system/update', { method: 'POST' });
+      toast(`Mise à jour vers ${r.target} lancée`);
+      watchUpdate();
+    } catch (e) { toast(e.message, true); btn.disabled = false; }
+  },
   start: () => run('Démarrage', async () => { await api(`/servers/${S.sel}/start`, { method: 'POST' }); toast('Serveur démarré'); }),
   stop: () => run('Arrêt', async () => { toast('Arrêt en cours (sauvegarde du monde)…'); await api(`/servers/${S.sel}/stop`, { method: 'POST' }); toast('Serveur arrêté'); }),
   restart: () => run('Redémarrage', async () => { toast('Redémarrage en cours…'); await api(`/servers/${S.sel}/restart`, { method: 'POST' }); toast('Serveur redémarré'); }),
@@ -568,7 +690,14 @@ const ACTIONS = {
   },
 };
 
+document.addEventListener('change', (e) => {
+  if (e.target.matches?.('select[data-env]')) e.target.classList.toggle('is-default', e.target.value === '');
+});
+
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+
 document.addEventListener('click', (e) => {
+  if (e.target.classList?.contains('modal-backdrop')) { closeModal(); return; }
   const nav = e.target.closest('[data-nav]');
   if (nav) {
     e.preventDefault();

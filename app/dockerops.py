@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import socket
 import threading
 import urllib.request
 
@@ -14,6 +15,7 @@ NETWORK = "mc-net"
 SERVER_IMAGE = "itzg/minecraft-server"
 ROUTER_IMAGE = "itzg/mc-router"
 ROUTER_NAME = "mc-router"
+UPDATER_NAME = "mc-panel-updater"
 ROUTER_API_PORT = 25564
 STOP_TIMEOUT = 60          # laisse le serveur sauvegarder le monde
 
@@ -311,6 +313,76 @@ class Manager:
         if code != 0 and not text:
             raise PanelError(502, "RCON indisponible (le serveur démarre-t-il encore ?)")
         return text
+
+    # ------------------------------------------------------------------ mise à jour du panel
+    def _self_container(self):
+        try:
+            return self.client.containers.get(socket.gethostname())
+        except (NotFound, PanelError):
+            return None
+
+    def _project_dir(self) -> str | None:
+        """Dossier du projet sur l'hôte (monté sur /project dans le conteneur du panel)."""
+        me = self._self_container()
+        if me is None:
+            return None
+        for mount in me.attrs.get("Mounts", []):
+            if mount.get("Destination") == "/project":
+                return mount.get("Source")
+        return None
+
+    def updater_supported(self) -> bool:
+        try:
+            return self._project_dir() is not None
+        except PanelError:
+            return False
+
+    def launch_updater(self, env: dict[str, str]) -> None:
+        me = self._self_container()
+        project = self._project_dir()
+        if me is None or project is None:
+            raise PanelError(501, "Mise à jour automatique indisponible : le panel doit tourner via le "
+                                  "docker-compose.yml fourni (volume .:/project).")
+        if self.updater_status()["state"] == "running":
+            raise PanelError(409, "Une mise à jour est déjà en cours.")
+        self.cleanup_updater()
+        try:
+            self.client.containers.run(
+                image=me.attrs["Image"],          # même image : elle embarque docker + compose
+                name=UPDATER_NAME,
+                command=["sh", "-c", "sleep 3 && docker compose -f /project/docker-compose.yml up -d --build"],
+                environment=env,
+                working_dir="/project",
+                volumes={
+                    project: {"bind": "/project", "mode": "ro"},
+                    "/var/run/docker.sock": {"bind": "/var/run/docker.sock", "mode": "rw"},
+                },
+                detach=True,
+            )
+        except APIError as exc:
+            raise PanelError(500, exc.explanation or str(exc)) from exc
+
+    def updater_status(self) -> dict:
+        try:
+            c = self.client.containers.get(UPDATER_NAME)
+        except NotFound:
+            return {"state": "idle"}
+        c.reload()
+        st = c.attrs.get("State", {})
+        if st.get("Running"):
+            state = "running"
+        else:
+            state = "done" if st.get("ExitCode") == 0 else "failed"
+        return {"state": state, "exit_code": st.get("ExitCode"),
+                "logs": c.logs(tail=60).decode("utf-8", errors="replace")}
+
+    def cleanup_updater(self) -> None:
+        try:
+            c = self.client.containers.get(UPDATER_NAME)
+        except (NotFound, PanelError):
+            return
+        if c.status != "running":
+            c.remove(force=True)
 
     # ------------------------------------------------------------------ routeur
     def _router_container(self):

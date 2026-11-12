@@ -14,19 +14,36 @@ Interface web pour gérer, sous Linux, des serveurs **itzg/minecraft-server** de
 Prérequis : Linux avec Docker (et le plugin Compose).
 
 ```bash
-git clone <ce-dépôt> && cd Serveur-Minecraft
-echo "PANEL_PASSWORD=choisis-un-mot-de-passe-fort" > .env
+git clone https://github.com/Hokare/Serveur-Minecraft.git && cd Serveur-Minecraft
 docker compose up -d --build
+docker logs mc-panel          # affiche le mot de passe initial généré
 ```
 
-Ouvre <http://127.0.0.1:8080> (utilisateur `admin`, ou `PANEL_USER`).
+Ouvre <http://127.0.0.1:8080> (utilisateur `admin`). Pour choisir toi-même le mot de passe initial,
+mets `PANEL_PASSWORD=...` (et éventuellement `PANEL_USER=...`) dans un fichier `.env` avant le premier lancement.
+
+> Le panel est construit **depuis GitHub** (`main`) : le code doit donc être poussé sur le dépôt.
+> Pour construire depuis le dossier local, mets `PANEL_BUILD_CONTEXT=.` dans `.env`.
+
+## Profil : compte et mise à jour
+
+Clique sur le cercle **MC** en bas à gauche :
+
+- **Compte** : change le nom d'utilisateur et/ou le mot de passe (le mot de passe actuel est demandé).
+  Ils sont stockés hachés dans le volume `mc-panel-data`. Après le changement, le navigateur te redemande de te connecter.
+  Si tu perds le mot de passe : `docker compose down -v` n'est **pas** nécessaire, supprime juste `auth.json` :
+  `docker exec mc-panel rm /data/auth.json && docker restart mc-panel` (un nouveau mot de passe est généré dans les logs).
+- **Logiciel** : compare la version installée au dernier commit GitHub. « Mettre à jour » lance un conteneur
+  temporaire `mc-panel-updater` qui reconstruit le panel puis le recrée ; la page se recharge toute seule.
+  Tes serveurs Minecraft et le routeur ne sont pas touchés.
+  La mise à jour automatique n'est disponible que si le panel a été lancé avec le `docker-compose.yml` fourni.
 
 Sans Docker, pour développer :
 
 ```bash
 python -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
-PANEL_PASSWORD=dev python -m app        # http://127.0.0.1:8080
+PANEL_PASSWORD=dev python -m app        # http://127.0.0.1:8080 (données dans ./data)
 ```
 
 ## Fonctionnement
@@ -42,7 +59,7 @@ PANEL_PASSWORD=dev python -m app        # http://127.0.0.1:8080
 
 Le panel pilote Docker : y accéder équivaut à être root sur la machine.
 
-- Définis toujours `PANEL_PASSWORD` (auth HTTP Basic). Sans lui, le panel est ouvert à tous ceux qui l'atteignent.
+- L'authentification (HTTP Basic) est toujours active : sans `PANEL_PASSWORD`, un mot de passe aléatoire est généré au premier démarrage.
 - Le port est publié sur `127.0.0.1` uniquement. Pour un accès distant, place-le derrière un reverse proxy **HTTPS** (Caddy, Traefik, nginx) ou un tunnel SSH : `ssh -L 8080:127.0.0.1:8080 serveur`.
 - Les requêtes d'écriture exigent l'en-tête `X-Requested-With` (anti-CSRF).
 - Redirige le port 25565 (routeur) sur ta box, jamais le port 8080.

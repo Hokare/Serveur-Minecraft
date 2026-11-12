@@ -1,10 +1,8 @@
 """API FastAPI du panel Minecraft."""
 from __future__ import annotations
 
-import base64
 import logging
 import os
-import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -12,25 +10,31 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from . import system
+from .auth import AuthStore
 from .dockerops import ROUTER_IMAGE, SERVER_IMAGE, Manager, PanelError
-from .models import CommandBody, RouterSpec, ServerSpec
+from .models import AccountUpdate, CommandBody, RouterSpec, ServerSpec
 from .monitor import ROUTER_KEY, Monitor, host_stats
 
 log = logging.getLogger("mc-panel")
 
-PANEL_USER = os.environ.get("PANEL_USER", "admin")
-PANEL_PASSWORD = os.environ.get("PANEL_PASSWORD", "")
 STATIC_DIR = Path(__file__).parent / "static"
 
+auth = AuthStore(
+    Path(os.environ.get("PANEL_DATA_DIR", "./data")),
+    default_user=os.environ.get("PANEL_USER", "admin"),
+    initial_password=os.environ.get("PANEL_PASSWORD", ""),
+)
 manager = Manager()
 monitor = Monitor(manager)
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    if not PANEL_PASSWORD:
-        log.warning("PANEL_PASSWORD n'est pas défini : le panel n'est PAS protégé. "
-                    "Ne l'expose jamais hors de localhost dans cet état.")
+    try:
+        manager.cleanup_updater()      # supprime l'updater terminé d'une mise à jour précédente
+    except Exception:  # noqa: BLE001 - Docker peut être indisponible au démarrage
+        pass
     monitor.start()
     yield
     monitor.stop()
@@ -42,22 +46,15 @@ app = FastAPI(title="MC Panel", lifespan=lifespan)
 # --------------------------------------------------------------------------- sécurité
 @app.middleware("http")
 async def security(request: Request, call_next):
-    if PANEL_PASSWORD:
-        ok = False
-        header = request.headers.get("authorization", "")
-        if header.lower().startswith("basic "):
-            try:
-                user, _, pwd = base64.b64decode(header[6:]).decode().partition(":")
-                ok = secrets.compare_digest(user, PANEL_USER) & secrets.compare_digest(pwd, PANEL_PASSWORD)
-            except ValueError:
-                ok = False
-        if not ok:
-            return JSONResponse({"detail": "Authentification requise"}, status_code=401,
-                                headers={"WWW-Authenticate": 'Basic realm="MC Panel"'})
+    if not auth.check(request.headers.get("authorization", "")):
+        return JSONResponse({"detail": "Authentification requise"}, status_code=401,
+                            headers={"WWW-Authenticate": 'Basic realm="MC Panel"'})
     # Anti-CSRF : un en-tête personnalisé force une requête « preflight » cross-origin.
     if request.method not in ("GET", "HEAD", "OPTIONS") and request.headers.get("x-requested-with") != "mc-panel":
         return JSONResponse({"detail": "En-tête X-Requested-With manquant"}, status_code=403)
-    return await call_next(request)
+    response = await call_next(request)
+    response.headers["Cache-Control"] = "no-cache"      # l'interface se met à jour sans vider le cache
+    return response
 
 
 @app.exception_handler(PanelError)
@@ -177,6 +174,36 @@ def pull_image(kind: str, tag: str = "latest"):
     ServerSpec.model_validate({"name": "x", "image_tag": tag})   # réutilise la validation du tag
     manager.pull(repo, tag)
     return {"ok": True}
+
+
+# --------------------------------------------------------------------------- compte et mise à jour
+@app.get("/api/account")
+def account():
+    return {"username": auth.user}
+
+
+@app.post("/api/account")
+def update_account(body: AccountUpdate):
+    try:
+        auth.update_credentials(body.current_password, body.new_username, body.new_password)
+    except ValueError as exc:
+        raise PanelError(400, str(exc)) from exc
+    return {"ok": True, "username": auth.user}
+
+
+@app.get("/api/system")
+def system_info():
+    return system.info(manager)
+
+
+@app.post("/api/system/update")
+def system_update():
+    return system.start_update(manager)
+
+
+@app.get("/api/system/update")
+def system_update_status():
+    return manager.updater_status()
 
 
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

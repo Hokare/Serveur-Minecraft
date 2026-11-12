@@ -109,5 +109,11 @@ class RouterSpec(BaseModel):
         return _check_env(v)
 
 
+class AccountUpdate(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_username: str | None = Field(default=None, max_length=64)
+    new_password: str | None = Field(default=None, max_length=128)
+
+
 class CommandBody(BaseModel):
     command: str = Field(min_length=1, max_length=500)
