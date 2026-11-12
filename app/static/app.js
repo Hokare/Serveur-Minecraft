@@ -54,6 +54,19 @@ function toast(msg, isErr = false) {
   toastTimer = setTimeout(() => (el.className = 'toast'), isErr ? 6000 : 2800);
 }
 
+// Journaux du serveur : retire les codes ANSI (couleurs, effacement de ligne), les caractères de contrôle,
+// les restes de l'invite « > » du terminal et le bruit des connexions RCON du panel.
+function cleanLog(raw) {
+  return String(raw)
+    .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '')
+    .replace(/\r/g, '')
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
+    .split('\n')
+    .map((l) => l.replace(/^>\.{0,6}(?=\[\d{2}:\d{2}:\d{2})/, ''))
+    .filter((l) => l.trim() !== '>' && !/Thread RCON Client .* (started|shutting down)\s*$/.test(l))
+    .join('\n');
+}
+
 async function api(path, { method = 'GET', body } = {}) {
   const headers = { 'X-Requested-With': 'mc-panel' };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
@@ -673,7 +686,7 @@ async function liveServer() {
       <p class="hint" style="margin-top:14px">Historique des 30 dernières minutes, mesuré toutes les 5 s.</p>`;
   } else if (S.tab === 'console') {
     try {
-      const { logs } = await api(`/servers/${encodeURIComponent(S.sel)}/logs?tail=300`);
+      const logs = cleanLog((await api(`/servers/${encodeURIComponent(S.sel)}/logs?tail=300`)).logs);
       const el = $('#log');
       if (el && token === `${S.sel}/${S.tab}`) {
         const stick = el.scrollTop + el.clientHeight >= el.scrollHeight - 30;
@@ -723,7 +736,7 @@ async function liveRouter() {
   let detail = { stats: r.stats, live_routes: null }, logs = '';
   if (r.exists) {
     try { detail = await api('/router'); } catch { /* ignoré */ }
-    try { logs = (await api('/router/logs?tail=80')).logs; } catch { /* ignoré */ }
+    try { logs = cleanLog((await api('/router/logs?tail=80')).logs); } catch { /* ignoré */ }
   }
   if (S.view !== 'router') return;
   const t = detail.stats;
@@ -1107,12 +1120,14 @@ document.addEventListener('click', (e) => {
 document.addEventListener('submit', async (e) => {
   if (e.target.id !== 'cmd-form') return;
   e.preventDefault();
-  const input = $('#cmd'), command = input.value.trim();
+  const input = $('#cmd');
+  // Les commandes Minecraft sont en minuscules (« HELP » est inconnu) ; les arguments gardent leur casse.
+  const command = input.value.trim().replace(/^\S+/, (w) => w.toLowerCase());
   if (!command) return;
   input.value = '';
   try {
     const { output } = await api(`/servers/${encodeURIComponent(S.sel)}/command`, { method: 'POST', body: { command } });
-    $('#cmd-out').textContent = `> ${command}\n${output}`;
+    $('#cmd-out').textContent = `> ${command}\n${cleanLog(output) || '(aucune réponse)'}`;
   } catch (err) { toast(err.message, true); }
   updateLive();
 });
