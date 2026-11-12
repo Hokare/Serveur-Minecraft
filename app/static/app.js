@@ -269,7 +269,6 @@ function renderPanel() {
   $('#panel-title').textContent = titles[S.view];
   document.querySelector('.nav').classList.toggle('no-panel', S.view !== 'server');
   const servers = (S.ov?.servers || []).filter((s) => s.name.includes(S.filter.toLowerCase()));
-  const router = S.ov?.router;
   const row = (s) => {
     const st = statusOf(s);
     const n = s.stats?.players;
@@ -278,10 +277,7 @@ function renderPanel() {
       <span class="meta">${n != null ? `${n}/${s.stats.max_players ?? '?'}` : ''}</span></button>`;
   };
   const up = servers.filter(isUp), down = servers.filter((s) => !isUp(s));
-  let html = `<div class="group-label">Routeur</div>
-    <button class="item ${S.view === 'router' ? 'active' : ''}" data-nav="router">${ic('route')}<span class="name">mc-router</span>
-      <span class="meta">${esc(router?.exists ? router.status : 'absent')}</span></button>`;
-  html += `<div class="group-label">En ligne</div>${up.length ? up.map(row).join('') : '<div class="empty">Aucun serveur en ligne</div>'}`;
+  let html = `<div class="group-label">En ligne</div>${up.length ? up.map(row).join('') : '<div class="empty">Aucun serveur en ligne</div>'}`;
   if (down.length) html += `<div class="group-label">Arrêtés</div>${down.map(row).join('')}`;
   $('#panel-list').innerHTML = html;
 }
